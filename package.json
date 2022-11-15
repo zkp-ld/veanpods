@@ -1,0 +1,29 @@
+{
+  "name": "@zkp-ld/veanpods",
+  "version": "0.0.1",
+  "author": "yamdan",
+  "type": "module",
+  "dependencies": {
+    "@types/express": "^4.17.14",
+    "@types/jest": "^29.2.0",
+    "@types/jsonld": "link:@types/jsonld",
+    "@types/node": "^18.11.0",
+    "@types/sparqljs": "^3.1.3",
+    "@zkp-ld/rdf-signatures-bbs": "0.0.5-unstable.ebd6027",
+    "express": "^4.18.2",
+    "jsonld": "^8.1.0",
+    "memory-level": "^1.0.0",
+    "nanoid": "^4.0.0",
+    "quadstore": "^11.0.6",
+    "quadstore-comunica": "^3.0.7",
+    "rdf-canonize": "https://github.com/zkp-ld/rdf-canonize.git#add-options",
+    "rdf-data-factory": "^1.1.1",
+    "sparqljs": "^3.6.1"
+  },
+  "scripts": {
+    "build": "tsc",
+    "exec": "node main.js",
+    "start": "tsc && node main.js",
+    "test": "jest"
+  }
+}
