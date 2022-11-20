@@ -7,10 +7,8 @@ import { Quadstore } from 'quadstore';
 import { Engine } from 'quadstore-comunica';
 import { BbsTermwiseSignatureProof2021, verifyProofMulti } from '@zkp-ld/rdf-signatures-bbs';
 import { addBnodePrefix, Anonymizer, extractVars, genJsonResults, getExtendedBindings, getRevealedQuads, getDocsAndProofs, identifyCreds, isWildcard, parseQuery, streamToArray, PROOF, VC_TYPE } from './utils.js';
-// source documents
-import creds from './sample/people_namedgraph_bnodes.json' assert { type: 'json' };
-// built-in JSON-LD contexts
-import { customLoader } from "./data/index.js";
+// built-in JSON-LD contexts and sample VCs
+import { customLoader, sampleVcs } from "../data/index.js";
 const CONTEXTS = [
     'https://www.w3.org/2018/credentials/v1',
     'https://zkp-ld.org/bbs-termwise-2021.jsonld',
@@ -38,7 +36,7 @@ const engine = new Engine(store);
 await store.open();
 // store initial documents
 const scope = await store.initScope(); // for preventing blank node collisions
-const quads = await jsonld.toRDF(creds, { documentLoader });
+const quads = await jsonld.toRDF(sampleVcs, { documentLoader });
 await store.multiPut(quads, { scope });
 // setup express server
 const app = express();
@@ -193,7 +191,6 @@ app.get('/zk-sparql/', async (req, res, next) => {
     const vps = [];
     for (const creds of revealedCredsArray) {
         const inputDocuments = [];
-        const datasetsForDebug = [];
         for (const [_credGraphIri, { wholeDoc, anonymizedDoc, proofs }] of creds) {
             // remove proof from whole document and anonymized document
             inputDocuments.push({

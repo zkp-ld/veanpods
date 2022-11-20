@@ -10,18 +10,18 @@ import jwsContext from "./context/jws.json" assert { type: 'json' };
 import vcExampleContext from "./context/vc_example_vocab.json" assert { type: 'json' };
 import schemaOrg from "./context/schemaOrg.json" assert { type: 'json' };
 import bbsTermwiseContext from "./context/bbs-termwise-2021.json" assert { type: 'json' };
-import exampleDidKey from "./data/did_example_489398593_test.json" assert { type: 'json' };
-import exampleDidDoc from "./data/did_example_489398593.json" assert { type: 'json' };
-import exampleDidb34Key from "./data/did_example_b34ca6cd37bbf23_test.json" assert { type: 'json' };
-import exampleDidb34Doc from "./data/did_example_b34ca6cd37bbf23.json" assert { type: 'json' };
-import exampleDid826Key from "./data/did_example_82612387612873_test.json" assert { type: 'json' };
-import exampleDid826Doc from "./data/did_example_82612387612873.json" assert { type: 'json' };
-import expExampleDidKey from "./data/exp_didkey_issuer1.json" assert { type: 'json' };
-import expExampleDidDoc from "./data/exp_diddoc_issuer1.json" assert { type: 'json' };
-import expExampleDidKey2 from "./data/exp_didkey_issuer2.json" assert { type: 'json' };
-import expExampleDidDoc2 from "./data/exp_diddoc_issuer2.json" assert { type: 'json' };
-import expExampleDidKey3 from "./data/exp_didkey_issuer3.json" assert { type: 'json' };
-import expExampleDidDoc3 from "./data/exp_diddoc_issuer3.json" assert { type: 'json' };
+import exampleDidKey from "./did/did_example_489398593_test.json" assert { type: 'json' };
+import exampleDidDoc from "./did/did_example_489398593.json" assert { type: 'json' };
+import exampleDidb34Key from "./did/did_example_b34ca6cd37bbf23_test.json" assert { type: 'json' };
+import exampleDidb34Doc from "./did/did_example_b34ca6cd37bbf23.json" assert { type: 'json' };
+import exampleDid826Key from "./did/did_example_82612387612873_test.json" assert { type: 'json' };
+import exampleDid826Doc from "./did/did_example_82612387612873.json" assert { type: 'json' };
+import expExampleDidKey from "./did/exp_didkey_issuer1.json" assert { type: 'json' };
+import expExampleDidDoc from "./did/exp_diddoc_issuer1.json" assert { type: 'json' };
+import expExampleDidKey2 from "./did/exp_didkey_issuer2.json" assert { type: 'json' };
+import expExampleDidDoc2 from "./did/exp_diddoc_issuer2.json" assert { type: 'json' };
+import expExampleDidKey3 from "./did/exp_didkey_issuer3.json" assert { type: 'json' };
+import expExampleDidDoc3 from "./did/exp_diddoc_issuer3.json" assert { type: 'json' };
 const _prepareDocs = (obj) => Object.entries(obj).map((e) => [
     e[0],
     JSON.stringify(e[1], null, 2),
@@ -57,24 +57,6 @@ export const _builtinContexts = {
     "https://schema.org/": schemaOrg,
     "http://schema.org/": schemaOrg,
 };
-export const builtinContexts = new Map(_prepareDocs(_builtinContexts));
-// const customDocLoader =
-//   (documents: Map<string, any>) =>
-//   (url: string): any => {
-//     const context = documents.get(url);
-//     if (context) {
-//       return {
-//         contextUrl: null, // this is for a context via a link header
-//         document: context, // this is the actual document that was loaded
-//         documentUrl: url, // this is the actual context URL after redirects
-//       };
-//     }
-//     throw new Error(
-//       `Error attempted to load document remotely, please cache '${url}'`
-//     );
-//   };
-// export const customLoader = (documents: Map<string, any>) =>
-//   customDocLoader(documents);
 const documents = Object.assign(_builtinContexts, _builtinDIDDocs);
 const customDocLoader = (url) => {
     const context = documents[url];

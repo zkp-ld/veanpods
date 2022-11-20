@@ -22,8 +22,7 @@
   },
   "scripts": {
     "build": "tsc",
-    "exec": "node main.js",
-    "start": "tsc && node main.js",
+    "start": "node ./src/main.js",
     "test": "jest"
   }
 }
