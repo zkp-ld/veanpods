@@ -180,6 +180,56 @@ export const getExtendedBindings = async (
   return bindingsArray;
 };
 
+export const fetch = async (
+  query: string,
+  store: Quadstore,
+  df: DataFactory<RDF.Quad>,
+  engine: Engine,
+) => {
+  // extract variables from SELECT query
+  const vars = extractVars(query);
+  if ('error' in vars) {
+    return vars;
+  }
+
+  // parse SELECT query
+  const parseResult = parseQuery(query);
+  if ('error' in parseResult) {
+    return parseResult; // TBD
+  }
+  const { parsedQuery, bgpTriples, gVarToBgpTriple } = parseResult;
+
+  // get extended bindings, i.e., bindings (SELECT query responses) + associated graph names corresponding to each BGP triples
+  const bindingsArray = await getExtendedBindings(
+    bgpTriples, parsedQuery, df, engine);
+
+  // get revealed and anonymized credentials
+  const anonymizer = new Anonymizer(df);
+  const revealedCredsArray = await Promise.all(
+    bindingsArray
+      .map((bindings) =>
+        identifyCreds(
+          bindings,
+          gVarToBgpTriple))
+      .map(({ bindings, graphIriToBgpTriple }) =>
+        getRevealedQuads(
+          graphIriToBgpTriple,
+          bindings,
+          vars,
+          df,
+          anonymizer))
+      .map(async (revealedQuads) =>
+        getDocsAndProofs(
+          await revealedQuads,
+          store,
+          df,
+          engine,
+          anonymizer)));
+
+  const anonToTerm = anonymizer.anonToTerm;
+  return { vars, bindingsArray, revealedCredsArray, anonToTerm };
+}
+
 export const identifyCreds = (
   bindings: RDF.Bindings,
   gVarToBgpTriple: Record<string, ZkTripleBgp>,

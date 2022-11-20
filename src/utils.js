@@ -98,6 +98,29 @@ export const getExtendedBindings = async (bgpTriples, parsedQuery, df, engine) =
     const bindingsArray = await streamToArray(bindingsStream);
     return bindingsArray;
 };
+export const fetch = async (query, store, df, engine) => {
+    // extract variables from SELECT query
+    const vars = extractVars(query);
+    if ('error' in vars) {
+        return vars;
+    }
+    // parse SELECT query
+    const parseResult = parseQuery(query);
+    if ('error' in parseResult) {
+        return parseResult; // TBD
+    }
+    const { parsedQuery, bgpTriples, gVarToBgpTriple } = parseResult;
+    // get extended bindings, i.e., bindings (SELECT query responses) + associated graph names corresponding to each BGP triples
+    const bindingsArray = await getExtendedBindings(bgpTriples, parsedQuery, df, engine);
+    // get revealed and anonymized credentials
+    const anonymizer = new Anonymizer(df);
+    const revealedCredsArray = await Promise.all(bindingsArray
+        .map((bindings) => identifyCreds(bindings, gVarToBgpTriple))
+        .map(({ bindings, graphIriToBgpTriple }) => getRevealedQuads(graphIriToBgpTriple, bindings, vars, df, anonymizer))
+        .map(async (revealedQuads) => getDocsAndProofs(await revealedQuads, store, df, engine, anonymizer)));
+    const anonToTerm = anonymizer.anonToTerm;
+    return { vars, bindingsArray, revealedCredsArray, anonToTerm };
+};
 export const identifyCreds = (bindings, gVarToBgpTriple) => {
     const graphIriAndGraphVars = [...bindings]
         .filter((b) => b[0].value.startsWith(GRAPH_VAR_PREFIX))

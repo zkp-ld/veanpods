@@ -7,7 +7,7 @@ import { DataFactory } from 'rdf-data-factory';
 import { Quadstore } from 'quadstore';
 import { Engine } from 'quadstore-comunica';
 import { BbsTermwiseSignatureProof2021, verifyProofMulti } from '@zkp-ld/rdf-signatures-bbs';
-import { addBnodePrefix, Anonymizer, extractVars, genJsonResults, getExtendedBindings, getRevealedQuads, getDocsAndProofs, identifyCreds, isWildcard, parseQuery, streamToArray, PROOF, VC_TYPE } from './utils.js';
+import { addBnodePrefix, extractVars, fetch, genJsonResults, isWildcard, streamToArray, PROOF, VC_TYPE } from './utils.js';
 
 // built-in JSON-LD contexts and sample VCs
 import { customLoader, sampleVcs } from "../data/index.js";
@@ -122,51 +122,6 @@ app.get('/sparql/', async (req, res, next) => {
   }
 });
 
-const fetch = async (query: string) => {
-  // extract variables from SELECT query
-  const vars = extractVars(query);
-  if ('error' in vars) {
-    return vars;
-  }
-
-  // parse SELECT query
-  const parseResult = parseQuery(query);
-  if ('error' in parseResult) {
-    return parseResult; // TBD
-  }
-  const { parsedQuery, bgpTriples, gVarToBgpTriple } = parseResult;
-
-  // get extended bindings, i.e., bindings (SELECT query responses) + associated graph names corresponding to each BGP triples
-  const bindingsArray = await getExtendedBindings(
-    bgpTriples, parsedQuery, df, engine);
-
-  // get revealed and anonymized credentials
-  const anonymizer = new Anonymizer(df);
-  const revealedCredsArray = await Promise.all(
-    bindingsArray
-      .map((bindings) =>
-        identifyCreds(
-          bindings,
-          gVarToBgpTriple))
-      .map(({ bindings, graphIriToBgpTriple }) =>
-        getRevealedQuads(
-          graphIriToBgpTriple,
-          bindings,
-          vars,
-          df,
-          anonymizer))
-      .map(async (revealedQuads) =>
-        getDocsAndProofs(
-          await revealedQuads,
-          store,
-          df,
-          engine,
-          anonymizer)));
-
-  const anonToTerm = anonymizer.anonToTerm;
-  return { vars, bindingsArray, revealedCredsArray, anonToTerm };
-}
-
 // zk-SPARQL endpoint (fetch)
 app.get('/zk-sparql/fetch', async (req, res, next) => {
   // parse query
@@ -174,7 +129,7 @@ app.get('/zk-sparql/fetch', async (req, res, next) => {
   if (typeof query !== 'string') {
     return { 'error': 'SPARQL query must be given as `query` parameter' };
   }
-  const queryResult = await fetch(query);
+  const queryResult = await fetch(query, store, df, engine);
   if ('error' in queryResult) {
     return next(new Error(queryResult.error));
   }
@@ -234,7 +189,7 @@ app.get('/zk-sparql/', async (req, res, next) => {
   if (typeof query !== 'string') {
     return { 'error': 'SPARQL query must be given as `query` parameter' };
   }
-  const queryResult = await fetch(query);
+  const queryResult = await fetch(query, store, df, engine);
   if ('error' in queryResult) {
     return next(new Error(queryResult.error));
   }
