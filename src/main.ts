@@ -10,7 +10,7 @@ import { BbsTermwiseSignatureProof2021, verifyProofMulti } from '@zkp-ld/rdf-sig
 import { addBnodePrefix, extractVars, fetch, genJsonResults, isWildcard, streamToArray, PROOF, VC_TYPE } from './utils.js';
 
 // built-in JSON-LD contexts and sample VCs
-import { customLoader, sampleVcs } from "../data/index.js";
+import { customLoader, sampleVcs } from "./data/index.js";
 
 const CONTEXTS = [
   'https://www.w3.org/2018/credentials/v1',

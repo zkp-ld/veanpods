@@ -1,3 +1,4 @@
 .devcontainer/
 .tmp/
 node_modules/
+build/

@@ -2,6 +2,7 @@
   "name": "@zkp-ld/veanpods",
   "version": "0.0.1",
   "author": "yamdan",
+  "main": "main.js",
   "type": "module",
   "dependencies": {
     "@types/express": "^4.17.14",
@@ -22,7 +23,7 @@
   },
   "scripts": {
     "build": "tsc",
-    "start": "node ./src/main.js",
+    "start": "node ./build/main.js",
     "test": "jest"
   }
 }
