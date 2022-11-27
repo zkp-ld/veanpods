@@ -117,8 +117,11 @@ app.get('/sparql/', async (req, res, next) => {
     const quadsJsonld = await respondToConstructQuery(parsedQuery);
     res.contentType('application/json+ld');
     res.send(quadsJsonld);
+  } else if (parsedQuery.resultType === 'boolean') {
+    const result = await parsedQuery.execute();
+    res.send({ head: {}, boolean: result});
   } else {
-    return next(new Error('SPARQL query must be SELECT form'));
+    return next(new Error('invalid SPARQL query'));
   }
 });
 
