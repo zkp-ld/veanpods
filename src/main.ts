@@ -7,7 +7,7 @@ import { DataFactory } from 'rdf-data-factory';
 import { Quadstore } from 'quadstore';
 import { Engine } from 'quadstore-comunica';
 import { BbsTermwiseSignatureProof2021, verifyProofMulti } from '@zkp-ld/rdf-signatures-bbs';
-import { addBnodePrefix, extractVars, fetch, genJsonResults, isWildcard, streamToArray, PROOF, VC_TYPE } from './utils.js';
+import { addBnodePrefix, parseQuery, fetch, genJsonResults, isWildcard, streamToArray, PROOF, VC_TYPE } from './utils.js';
 
 // built-in JSON-LD contexts and sample VCs
 import { customLoader, sampleVcs } from "./data/index.js";
@@ -67,11 +67,12 @@ const respondToSelectQuery = async (query: string, parsedQuery: RDF.QueryBinding
   const bindingsArray = await streamToArray(bindingsStream);
 
   // extract variables from SELECT query
-  const vars = extractVars(query);
-  if ('error' in vars) {
-    throw new Error(vars.error);
+  const varsAndParsedQuery = parseQuery(query);
+  if ('error' in varsAndParsedQuery) {
+    throw new Error(varsAndParsedQuery.error);
   }
-
+  const vars = varsAndParsedQuery.vars;
+  
   // send response
   let jsonVars: string[];
   if (vars.length === 1 && 'value' in vars[0] && vars[0].value === '*') {
@@ -112,14 +113,16 @@ app.get('/sparql/', async (req, res, next) => {
   // execute query
   if (parsedQuery.resultType === 'bindings') {
     const { jsonVars, bindingsArray } = await respondToSelectQuery(query, parsedQuery)
-    res.send(genJsonResults(jsonVars, bindingsArray));
+    const result = genJsonResults(jsonVars, bindingsArray)
+    res.send(result);
   } else if (parsedQuery.resultType === 'quads') {
-    const quadsJsonld = await respondToConstructQuery(parsedQuery);
+    const result = await respondToConstructQuery(parsedQuery);
     res.contentType('application/json+ld');
-    res.send(quadsJsonld);
+    res.send(result);
   } else if (parsedQuery.resultType === 'boolean') {
-    const result = await parsedQuery.execute();
-    res.send({ head: {}, boolean: result});
+    const askResult = await parsedQuery.execute();
+    const result = { head: {}, boolean: askResult};
+    res.send(result);
   } else {
     return next(new Error('invalid SPARQL query'));
   }

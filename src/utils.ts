@@ -4,6 +4,7 @@ import * as RDF from '@rdfjs/types';
 import sparqljs from 'sparqljs';
 import { nanoid } from 'nanoid';
 import { Quadstore } from 'quadstore';
+import { parse } from 'path';
 
 // ** constants ** //
 
@@ -51,13 +52,12 @@ type IdentifyCredsResultType = {
   graphIriToBgpTriple: Map<string, ZkTripleBgp[]>,
 };
 
-type ParseQueryResult = {
-  parsedQuery: sparqljs.SelectQuery;
-  bgpTriples: ZkTripleBgp[];
-  gVarToBgpTriple: Record<string, ZkTripleBgp>;
-} | {
-  error: string;
-};
+type ParsedQuery = sparqljs.SelectQuery | sparqljs.AskQuery;
+
+type VarsAndParsedQuery = {
+  vars: sparqljs.VariableTerm[] | [sparqljs.Wildcard],
+  parsedQuery: ParsedQuery,
+}
 
 export interface RevealedQuads {
   revealedQuads: RDF.Quad[];
@@ -80,60 +80,57 @@ export const isVariableTerms =
   (vs: sparqljs.Variable[]): vs is sparqljs.VariableTerm[] =>
     vs.every((v) => isVariableTerm(v));
 
-export const extractVars =
-  (query: string):
-    sparqljs.VariableTerm[] |
-    [sparqljs.Wildcard] |
-    { error: string } => {
+// parse SELECT or ASK query
+export const parseQuery =
+  (query: string): VarsAndParsedQuery | { error: string } => {
     const parser = new sparqljs.Parser();
     try {
       const parsedQuery = parser.parse(query);
-      if (!(parsedQuery.type === 'query'
-        && parsedQuery.queryType === 'SELECT')) {
-        return { error: 'query must be SELECT form' };
+      if (parsedQuery.type !== 'query') {
+        return { error: 'query must be SELECT or ASK form' };
       }
-      if (isWildcard(parsedQuery.variables)
-        || (isVariableTerms(parsedQuery.variables))) {
-        return parsedQuery.variables;
+      const queryType = parsedQuery.queryType;
+      if (queryType === 'SELECT') {
+        if (isWildcard(parsedQuery.variables)
+          || (isVariableTerms(parsedQuery.variables))) {
+          return {
+            vars: parsedQuery.variables,
+            parsedQuery,
+          };
+        } else {
+          return { error: 'query must not contain term expressions' }
+        }
+      } else if (queryType === 'ASK') {
+        return {
+          vars: [],
+          parsedQuery,
+        };
       } else {
-        return { error: 'query must not contain term expressions' }
+        return { error: 'query must be SELECT or ASK form' };
       }
     } catch (error) {
       return { error: 'malformed query' };
     }
   }
 
-// parse the original SELECT query to get Basic Graph Pattern (BGP)
-export const parseQuery = (query: string): ParseQueryResult => {
-  const parser = new sparqljs.Parser();
-  let parsedQuery;
-  try {
-    parsedQuery = parser.parse(query);
-    if ((parsedQuery.type !== 'query'
-      || parsedQuery.queryType !== 'SELECT')) {
-      return { error: 'SELECT query form must be used' };
+// extract Basic Graph Pattern (BGP) triples from parsed query
+export const getBgpTriples =
+  (parsedQuery: ParsedQuery): ZkTripleBgp[] | { error: string } => {
+    // validate zk-SPARQL query
+    const bgpPatterns = parsedQuery.where?.filter((p) => p.type === 'bgp');
+    if (bgpPatterns?.length !== 1) {
+      return { error: 'WHERE clause must consist of only one basic graph pattern' }
     }
-  } catch (error) {
-    return { error: 'malformed query' };
+
+    // extract BGP triples
+    const bgpPattern = bgpPatterns[0] as sparqljs.BgpPattern;
+    const bgpTriples = bgpPattern.triples;
+    if (!isTriplesWithoutPropertyPath(bgpTriples)) {
+      return { error: 'property paths are not supported' };
+    };
+
+    return bgpTriples;
   }
-
-  // validate zk-SPARQL query
-  const bgpPatterns = parsedQuery.where?.filter((p) => p.type === 'bgp');
-  if (bgpPatterns?.length !== 1) {
-    return { error: 'WHERE clause must consist of only one basic graph pattern' }
-  }
-  const bgpPattern = bgpPatterns[0] as sparqljs.BgpPattern;
-  const bgpTriples = bgpPattern.triples;
-  if (!isTriplesWithoutPropertyPath(bgpTriples)) {
-    return { error: 'property paths are not supported' };
-  };
-
-  const gVarToBgpTriple: Record<string, ZkTripleBgp> = Object.assign({}, ...bgpTriples.map((triple, i) => ({
-    [`${GRAPH_VAR_PREFIX}${i}`]: triple
-  })));
-
-  return { parsedQuery, bgpTriples, gVarToBgpTriple };
-}
 
 export const isTripleWithoutPropertyPath =
   (triple: sparqljs.Triple):
@@ -148,7 +145,7 @@ export const isTriplesWithoutPropertyPath =
 // identify credentials related to the given query
 export const getExtendedBindings = async (
   bgpTriples: sparqljs.Triple[],
-  parsedQuery: sparqljs.SelectQuery,
+  parsedQuery: ParsedQuery,
   df: DataFactory<RDF.Quad>,
   engine: Engine
 ) => {
@@ -166,12 +163,17 @@ export const getExtendedBindings = async (
     ));
 
   // generate a new SELECT query to identify named graphs
-  parsedQuery.distinct = true;
-  parsedQuery.variables = [new sparqljs.Wildcard()];
-  parsedQuery.where = parsedQuery.where?.filter((p) => p.type !== 'bgp').concat(graphPatterns);
+  const extendedQuery: sparqljs.SelectQuery = {
+    type: 'query',
+    queryType: 'SELECT',
+    distinct: true,
+    variables: [new sparqljs.Wildcard()],
+    prefixes: parsedQuery.prefixes,
+    where: parsedQuery.where?.filter((p) => p.type !== 'bgp').concat(graphPatterns),
+  };
 
   const generator = new sparqljs.Generator();
-  const generatedQuery = generator.stringify(parsedQuery);
+  const generatedQuery = generator.stringify(extendedQuery);
 
   // extract identified graphs from the query result
   const bindingsStream = await engine.queryBindings(generatedQuery, { unionDefaultGraph: true });
@@ -186,20 +188,26 @@ export const fetch = async (
   df: DataFactory<RDF.Quad>,
   engine: Engine,
 ) => {
-  // extract variables from SELECT query
-  const vars = extractVars(query);
-  if ('error' in vars) {
-    return vars;
+  // parse SELECT or ASK query
+  const varsAndParsedQuery = parseQuery(query);
+  if ('error' in varsAndParsedQuery) {
+    return varsAndParsedQuery;
+  }
+  const { vars, parsedQuery } = varsAndParsedQuery;
+
+  // extract Basic Graph Pattern (BGP) triples from parsed query
+  const bgpTriples = getBgpTriples(parsedQuery);
+  if ('error' in bgpTriples) {
+    return bgpTriples; // TBD
   }
 
-  // parse SELECT query
-  const parseResult = parseQuery(query);
-  if ('error' in parseResult) {
-    return parseResult; // TBD
-  }
-  const { parsedQuery, bgpTriples, gVarToBgpTriple } = parseResult;
+  const gVarToBgpTriple: Record<string, ZkTripleBgp>
+    = Object.assign({}, ...bgpTriples.map((triple, i) => ({
+      [`${GRAPH_VAR_PREFIX}${i}`]: triple
+    })));
 
-  // get extended bindings, i.e., bindings (SELECT query responses) + associated graph names corresponding to each BGP triples
+  // get extended bindings, i.e.,
+  // bindings (SELECT query responses) + associated graph names corresponding to each BGP triples
   const bindingsArray = await getExtendedBindings(
     bgpTriples, parsedQuery, df, engine);
 
