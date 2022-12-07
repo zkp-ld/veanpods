@@ -72,7 +72,7 @@ const respondToSelectQuery = async (query: string, parsedQuery: RDF.QueryBinding
     throw new Error(varsAndParsedQuery.error);
   }
   const vars = varsAndParsedQuery.vars;
-  
+
   // send response
   let jsonVars: string[];
   if (vars.length === 1 && 'value' in vars[0] && vars[0].value === '*') {
@@ -107,7 +107,7 @@ app.get('/sparql/', async (req, res, next) => {
   try {
     parsedQuery = await engine.query(query, { unionDefaultGraph: true });
   } catch (error) {
-    return next(new Error(`malformed query: ${error}`));
+    return next(new Error(`malformed query`));
   }
 
   // execute query
