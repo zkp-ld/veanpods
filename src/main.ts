@@ -66,22 +66,24 @@ const respondToSelectQuery = async (query: string, parsedQuery: RDF.QueryBinding
   const bindingsStream = await parsedQuery.execute();
   const bindingsArray = await streamToArray(bindingsStream);
 
-  // extract variables from SELECT query
-  const varsAndParsedQuery = parseQuery(query);
-  if ('error' in varsAndParsedQuery) {
-    throw new Error(varsAndParsedQuery.error);
-  }
-  const vars = varsAndParsedQuery.vars;
+  // // extract variables from SELECT query
+  // const varsAndParsedQuery = parseQuery(query);
+  // if ('error' in varsAndParsedQuery) {
+  //   throw new Error(varsAndParsedQuery.error);
+  // }
+  // const vars = varsAndParsedQuery.vars;
 
-  // send response
-  let jsonVars: string[];
-  if (vars.length === 1 && 'value' in vars[0] && vars[0].value === '*') {
-    // SELECT * WHERE {...}
-    jsonVars = bindingsArray.length >= 1 ? [...bindingsArray[0].keys()].map((k) => k.value) : [''];
-  } else {
-    // SELECT ?s ?p ?o WHERE {...}
-    jsonVars = vars.map((v) => v.value);
-  }
+  // // send response
+  // let jsonVars: string[];
+  // if (vars.length === 1 && 'value' in vars[0] && vars[0].value === '*') {
+  //   // SELECT * WHERE {...}
+  //   jsonVars = bindingsArray.length >= 1 ? [...bindingsArray[0].keys()].map((k) => k.value) : [''];
+  // } else {
+  //   // SELECT ?s ?p ?o WHERE {...}
+  //   jsonVars = vars.map((v) => v.value);
+  // }
+
+  let jsonVars = bindingsArray.length >= 1 ? [...bindingsArray[0].keys()].map((k) => k.value) : [''];
   return { jsonVars, bindingsArray };
 };
 
@@ -121,16 +123,16 @@ app.get('/sparql/', async (req, res, next) => {
     res.send(result);
   } else if (parsedQuery.resultType === 'boolean') {
     const askResult = await parsedQuery.execute();
-    const result = { head: {}, boolean: askResult};
+    const result = { head: {}, boolean: askResult };
     res.send(result);
   } else {
     return next(new Error('invalid SPARQL query'));
   }
 });
 
-// zk-SPARQL endpoint (fetch)
+// zk-SPARQL endpoint (fetch only)
 app.get('/zk-sparql/fetch', async (req, res, next) => {
-  // parse query
+  // 1. parse zk-SPARQL query and execute SELECT on internal quadstore
   const query = req.query.query;
   if (typeof query !== 'string') {
     return { 'error': 'SPARQL query must be given as `query` parameter' };
@@ -139,12 +141,13 @@ app.get('/zk-sparql/fetch', async (req, res, next) => {
   if ('error' in queryResult) {
     return next(new Error(queryResult.error));
   }
-  const { vars, bindingsArray, revealedCredsArray } = queryResult;
+  const { requiredVars, extendedSolutions, revealedCredsArray, anonToTerm: _ } = queryResult;
 
-  // serialize credentials
+  // 2. generate VPs (without real proofs)
   const vps: VP[] = [];
   for (const creds of revealedCredsArray) {
-    const vcs: jsonld.NodeObject[] = [];
+    // serialize derived VCs as JSON-LD documents
+    const derivedVCs: jsonld.NodeObject[] = [];
     for (const [_credGraphIri, { anonymizedDoc, proofs }] of creds) {
       // remove proof.proofValue
       const proofQuads = proofs.flat().filter(
@@ -160,29 +163,31 @@ app.get('/zk-sparql/fetch', async (req, res, next) => {
       // to compact JSON-LD
       const credJsonCompact = await jsonld.compact(credJson, CONTEXTS, { documentLoader });
       // shape it to be a VC
-      const vc = await jsonld.frame(credJsonCompact, VC_FRAME, { documentLoader });
-      vcs.push(vc);
+      const derivedVC = await jsonld.frame(credJsonCompact, VC_FRAME, { documentLoader });
+      derivedVCs.push(derivedVC);
     }
+
+    // serialize VP
     const vp = { ...VP_TEMPLATE };
-    vp['verifiableCredential'] = vcs;
+    vp['verifiableCredential'] = derivedVCs;
     vps.push(vp);
   }
 
-  // add VP (or VCs) to bindings
-  const bindingsWithVPArray = bindingsArray.map(
-    (bindings, i) =>
-      bindings.set('vp', df.literal(
+  // 3. add VPs (or VCs) to each corresponding solutions
+  const bindingsWithVPArray = extendedSolutions.map(
+    (extendedSolution, i) =>
+      extendedSolution.set('vp', df.literal(
         `${JSON.stringify(vps[i], null, 2)}`,
         df.namedNode(`${RDF_PREFIX}JSON`))));
 
-  // send response
+  // 4. send response
   let jsonVars: string[];
-  if (isWildcard(vars)) {
+  if (isWildcard(requiredVars)) {
     // SELECT * WHERE {...}
-    jsonVars = bindingsArray.length >= 1 ? [...bindingsArray[0].keys()].map((k) => k.value) : [''];
+    jsonVars = extendedSolutions.length >= 1 ? [...extendedSolutions[0].keys()].map((k) => k.value) : [''];
   } else {
     // SELECT ?s ?p ?o WHERE {...}
-    jsonVars = vars.map((v) => v.value);
+    jsonVars = requiredVars.map((v) => v.value);
   }
   jsonVars.push('vp');
   res.send(genJsonResults(jsonVars, bindingsWithVPArray));
@@ -190,7 +195,7 @@ app.get('/zk-sparql/fetch', async (req, res, next) => {
 
 // zk-SPARQL endpoint (derive proofs)
 app.get('/zk-sparql/', async (req, res, next) => {
-  // parse query
+  // 1. parse zk-SPARQL query and execute SELECT on internal quadstore
   const query = req.query.query;
   if (typeof query !== 'string') {
     return { 'error': 'SPARQL query must be given as `query` parameter' };
@@ -199,24 +204,24 @@ app.get('/zk-sparql/', async (req, res, next) => {
   if ('error' in queryResult) {
     return next(new Error(queryResult.error));
   }
-  const { vars, bindingsArray, revealedCredsArray, anonToTerm } = queryResult;
+  const {
+    extendedSolutions,
+    revealedCredsArray,
+    requiredVars,
+    anonToTerm
+  } = queryResult;
 
-  // derive proofs
+  // 2. generate VPs
   const vps: VP[] = [];
   for (const creds of revealedCredsArray) {
-    const inputDocuments = [];
-
-    for (const [_credGraphIri, { wholeDoc, anonymizedDoc, proofs }] of creds) {
-      // remove proof from whole document and anonymized document
-      inputDocuments.push({
-        document: wholeDoc.filter((quad) => quad.predicate.value !== PROOF),
-        proofs,
-        revealedDocument: anonymizedDoc.filter((quad) => quad.predicate.value !== PROOF),
-        anonToTerm
-      });
-    }
-
     // run BBS+
+    const inputDocuments = Array.from(creds,
+      ([_, { wholeDoc, anonymizedDoc, proofs }]) => ({
+        document: wholeDoc.filter((quad) => quad.predicate.value !== PROOF),  // document without `proof` predicate
+        proofs,
+        revealedDocument: anonymizedDoc.filter((quad) => quad.predicate.value !== PROOF),  // document without `proof` predicate
+        anonToTerm
+      }));
     const suite = new BbsTermwiseSignatureProof2021({
       useNativeCanonize: false,
     });
@@ -225,10 +230,9 @@ app.get('/zk-sparql/', async (req, res, next) => {
       documentLoader,
     });
 
-    // RDF to JSON-LD
+    // serialize derived VCs as JSON-LD documents
     const derivedVcs: any[] = [];
     for (const { document, proof: proofs } of derivedProofs) {
-
       // connect document and proofs
       const documentId = document.find(
         (quad: RDF.Quad) => quad.predicate.value === RDF_TYPE && quad.object.value === VC_TYPE)
@@ -256,38 +260,48 @@ app.get('/zk-sparql/', async (req, res, next) => {
       derivedVcs.push(derivedVc);
     }
 
-    // serialize credentials
+    // serialize VP
     const vp = { ...VP_TEMPLATE };
     vp['verifiableCredential'] = derivedVcs;
     vps.push(vp);
 
-    // debug: verify derived VC
-    // separate document and proofs
-    const verified = await verifyProofMulti(derivedVcs,
-      {
-        suite,
-        documentLoader,
-        purpose: new jsigs.purposes.AssertionProofPurpose()
-      });
-    console.log(`verified: ${JSON.stringify(verified, null, 2)}`);
+    // // debug: verify derived VC
+    // // separate document and proofs
+    // const verified = await verifyProofMulti(derivedVcs,
+    //   {
+    //     suite,
+    //     documentLoader,
+    //     purpose: new jsigs.purposes.AssertionProofPurpose()
+    //   });
+    // console.log(`verified: ${JSON.stringify(verified, null, 2)}`);
   }
 
-  // add VP (or VCs) to bindings
-  const bindingsWithVPArray = bindingsArray.map(
-    (bindings, i) =>
-      bindings.set('vp', df.literal(
-        `${JSON.stringify(vps[i], null, 2)}`,
-        df.namedNode(`${RDF_PREFIX}JSON`))));
+  // 3. remove unrevealed bindings from extended solutions
+  const requiredVarNames = requiredVars.map((v) => v.value);
+  const revealedSolutions = isWildcard(requiredVars) ?
+    extendedSolutions :
+    extendedSolutions.map(
+      (extendedSolution) => extendedSolution.filter(
+        (_, key) => requiredVarNames.includes(key.value))
+    );
 
-  // send response
+  // 4. add VPs (or VCs) to each corresponding solutions
+  const revealedSolutionWithVPs = revealedSolutions.map(
+    (revealedSolution, i) =>
+      revealedSolution.set('vp', df.literal(
+        `${JSON.stringify(vps[i], null, 2)}`)));
+
+  // 5. send response
   let jsonVars: string[];
-  if (isWildcard(vars)) {
+  if (isWildcard(requiredVars)) {
     // SELECT * WHERE {...}
-    jsonVars = bindingsArray.length >= 1 ? [...bindingsArray[0].keys()].map((k) => k.value) : [''];
+    jsonVars = extendedSolutions.length >= 1 ?
+      [...extendedSolutions[0].keys()].map((k) => k.value) :
+      [''];
   } else {
     // SELECT ?s ?p ?o WHERE {...}
-    jsonVars = vars.map((v) => v.value);
+    jsonVars = requiredVars.map((v) => v.value);
   }
   jsonVars.push('vp');
-  res.send(genJsonResults(jsonVars, bindingsWithVPArray));
+  res.send(genJsonResults(jsonVars, revealedSolutionWithVPs));
 })

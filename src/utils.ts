@@ -48,14 +48,14 @@ export const isZkObject =
     || t.termType === 'Literal');
 
 type IdentifyCredsResultType = {
-  bindings: RDF.Bindings,
+  extendedSolution: RDF.Bindings,
   graphIriToBgpTriple: Map<string, ZkTripleBgp[]>,
 };
 
 type ParsedQuery = sparqljs.SelectQuery | sparqljs.AskQuery;
 
 type VarsAndParsedQuery = {
-  vars: sparqljs.VariableTerm[] | [sparqljs.Wildcard],
+  requiredVars: sparqljs.VariableTerm[] | [sparqljs.Wildcard],
   parsedQuery: ParsedQuery,
 }
 
@@ -66,9 +66,15 @@ export interface RevealedQuads {
 
 export interface RevealedCreds {
   wholeDoc: RDF.Quad[];
-  revealedDoc: RDF.Quad[];
   anonymizedDoc: RDF.Quad[];
   proofs: RDF.Quad[][];
+};
+
+interface FetchResult {
+  extendedSolutions: RDF.Bindings[];
+  revealedCredsArray: Map<string, RevealedCreds>[];
+  requiredVars: sparqljs.VariableTerm[] | [sparqljs.Wildcard];
+  anonToTerm: Map<string, ZkTerm>;
 };
 
 // ** functions ** //
@@ -80,7 +86,7 @@ export const isVariableTerms =
   (vs: sparqljs.Variable[]): vs is sparqljs.VariableTerm[] =>
     vs.every((v) => isVariableTerm(v));
 
-// parse SELECT or ASK query
+// parse zk-SPARQL query
 export const parseQuery =
   (query: string): VarsAndParsedQuery | { error: string } => {
     const parser = new sparqljs.Parser();
@@ -94,7 +100,7 @@ export const parseQuery =
         if (isWildcard(parsedQuery.variables)
           || (isVariableTerms(parsedQuery.variables))) {
           return {
-            vars: parsedQuery.variables,
+            requiredVars: parsedQuery.variables,
             parsedQuery,
           };
         } else {
@@ -102,7 +108,7 @@ export const parseQuery =
         }
       } else if (queryType === 'ASK') {
         return {
-          vars: [],
+          requiredVars: [],
           parsedQuery,
         };
       } else {
@@ -142,15 +148,15 @@ export const isTriplesWithoutPropertyPath =
     triples is ZkTripleBgp[] =>
     triples.map(isTripleWithoutPropertyPath).every(Boolean);
 
-// identify credentials related to the given query
-export const getExtendedBindings = async (
+// get extended SPARQL solutions, which are SPARQL solutions with _names of graphs_ where each input BGP triples is included
+export const getExtendedSolutions = async (
   bgpTriples: sparqljs.Triple[],
   parsedQuery: ParsedQuery,
   df: DataFactory<RDF.Quad>,
   engine: Engine
 ) => {
-  // generate graph patterns
-  const graphPatterns: sparqljs.GraphPattern[]
+  // construct an extended SPARQL query
+  const extendedGraphPatterns: sparqljs.GraphPattern[]
     = bgpTriples.map((triple, i) => (
       {
         type: 'graph',
@@ -161,25 +167,24 @@ export const getExtendedBindings = async (
         name: df.variable(`${GRAPH_VAR_PREFIX}${i}`),
       }
     ));
-
-  // generate a new SELECT query to identify named graphs
+  const where = parsedQuery
+    .where?.filter((p) => p.type !== 'bgp')  // remove original BGPs
+    .concat(extendedGraphPatterns);  // add extended BGPs
   const extendedQuery: sparqljs.SelectQuery = {
     type: 'query',
     queryType: 'SELECT',
     distinct: true,
     variables: [new sparqljs.Wildcard()],
     prefixes: parsedQuery.prefixes,
-    where: parsedQuery.where?.filter((p) => p.type !== 'bgp').concat(graphPatterns),
+    where,
   };
 
+  // execute extended query and get extended solutions
   const generator = new sparqljs.Generator();
   const generatedQuery = generator.stringify(extendedQuery);
-
-  // extract identified graphs from the query result
   const bindingsStream = await engine.queryBindings(generatedQuery, { unionDefaultGraph: true });
-  const bindingsArray = await streamToArray(bindingsStream);
-
-  return bindingsArray;
+  const extendedSolutions = await streamToArray(bindingsStream);
+  return extendedSolutions;
 };
 
 export const fetch = async (
@@ -187,13 +192,13 @@ export const fetch = async (
   store: Quadstore,
   df: DataFactory<RDF.Quad>,
   engine: Engine,
-) => {
-  // parse SELECT or ASK query
+): Promise<FetchResult | { error: string }> => {
+  // parse zk-SPARQL query
   const varsAndParsedQuery = parseQuery(query);
   if ('error' in varsAndParsedQuery) {
     return varsAndParsedQuery;
   }
-  const { vars, parsedQuery } = varsAndParsedQuery;
+  const { requiredVars, parsedQuery } = varsAndParsedQuery;
 
   // extract Basic Graph Pattern (BGP) triples from parsed query
   const bgpTriples = getBgpTriples(parsedQuery);
@@ -208,26 +213,26 @@ export const fetch = async (
 
   // get extended bindings, i.e.,
   // bindings (SELECT query responses) + associated graph names corresponding to each BGP triples
-  const bindingsArray = await getExtendedBindings(
+  const extendedSolutions = await getExtendedSolutions(
     bgpTriples, parsedQuery, df, engine);
 
   // get revealed and anonymized credentials
   const anonymizer = new Anonymizer(df);
   const revealedCredsArray = await Promise.all(
-    bindingsArray
-      .map((bindings) =>
+    extendedSolutions
+      .map((extendedSolution) =>
         identifyCreds(
-          bindings,
+          extendedSolution,
           gVarToBgpTriple))
-      .map(({ bindings, graphIriToBgpTriple }) =>
+      .map(({ extendedSolution, graphIriToBgpTriple }) =>
         getRevealedQuads(
           graphIriToBgpTriple,
-          bindings,
-          vars,
+          extendedSolution,
+          requiredVars,
           df,
           anonymizer))
       .map(async (revealedQuads) =>
-        getDocsAndProofs(
+        getRevealedCreds(
           await revealedQuads,
           store,
           df,
@@ -235,22 +240,31 @@ export const fetch = async (
           anonymizer)));
 
   const anonToTerm = anonymizer.anonToTerm;
-  return { vars, bindingsArray, revealedCredsArray, anonToTerm };
+  
+  return {
+    extendedSolutions,
+    revealedCredsArray,
+    requiredVars,
+    anonToTerm
+  };
 }
 
+// get `graphIriToBgpTriple`
+// e.g., { ggggg0: [ (:s1 :p1 :o1), (:s1 :p2 :o2) ], ggggg1: [ (:s1 :p3 :o3 )] }
 export const identifyCreds = (
-  bindings: RDF.Bindings,
+  extendedSolution: RDF.Bindings,
   gVarToBgpTriple: Record<string, ZkTripleBgp>,
 ): IdentifyCredsResultType => {
-  const graphIriAndGraphVars = [...bindings]
+  const graphIriAndGraphVars = [...extendedSolution]
     .filter((b) => b[0].value.startsWith(GRAPH_VAR_PREFIX))
     .map(([gVar, gIri]) => [gIri.value, gVar.value]);
   const graphIriAndBgpTriples: [string, ZkTripleBgp][] = graphIriAndGraphVars
     .map(([gIri, gVar]) => [gIri, gVarToBgpTriple[gVar]]);
   const graphIriToBgpTriple = entriesToMap(graphIriAndBgpTriples);
-  return ({ bindings, graphIriToBgpTriple });
+  return ({ extendedSolution, graphIriToBgpTriple });
 };
 
+// get `revealedQuads`
 export const getRevealedQuads = async (
   graphIriToBgpTriple: Map<string, ZkTripleBgp[]>,
   bindings: RDF.Bindings,
@@ -258,7 +272,7 @@ export const getRevealedQuads = async (
   df: DataFactory<RDF.Quad>,
   anonymizer: Anonymizer,
 ) => {
-  const result = new Map<string, RevealedQuads>();
+  const result = new Map<string, RDF.Quad[]>();
   for (const [credGraphIri, bgpTriples] of graphIriToBgpTriple.entries()) {
     const revealedQuads = bgpTriples.flatMap((triple) => {
       const subject = triple.subject.termType === 'Variable'
@@ -279,13 +293,14 @@ export const getRevealedQuads = async (
     const anonymizedQuads = isWildcard(vars)
       ? revealedQuads.map((quad) => df.fromQuad(quad)) // deep copy
       : anonymizeQuad(bgpTriples, vars, bindings, df, anonymizer);
-    result.set(credGraphIri, { revealedQuads, anonymizedQuads });
+    result.set(credGraphIri, anonymizedQuads);
   }
   return result;
 };
 
-export const getDocsAndProofs = async (
-  revealedQuads: Map<string, RevealedQuads>,
+// get `revealedCreds`
+export const getRevealedCreds = async (
+  revealedQuads: Map<string, RDF.Quad[]>,
   store: Quadstore,
   df: DataFactory<RDF.Quad>,
   engine: Engine,
@@ -314,12 +329,11 @@ export const getDocsAndProofs = async (
           return proof.items;
         }));
 
-    // get revealed credential by addding metadata to revealed quads
+    // get credential metadata
     const metadata = await getCredentialMetadata(graphIri, df, store, engine)
       ?? [];
-    const revealedDoc = quads.revealedQuads.concat(metadata);
 
-    // get anonymized credential by addding metadata to anonymized quads
+    // get anonymized credential by adding metadata to anonymized quads
     const anonymizedMetadata = metadata.map((quad) => {
       const subject = isZkSubject(quad.subject) ?
         anonymizer.get(quad.subject) : quad.subject;
@@ -335,12 +349,10 @@ export const getDocsAndProofs = async (
       );
     });
     const anonymizedDoc =
-      metadata == undefined ? quads.anonymizedQuads
-        : quads.anonymizedQuads.concat(anonymizedMetadata);
+      metadata == undefined ? quads : quads.concat(anonymizedMetadata);
 
     revealedCreds.set(graphIri, {
       wholeDoc,
-      revealedDoc,
       anonymizedDoc,
       proofs,
     });

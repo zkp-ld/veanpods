@@ -186,5 +186,183 @@
         "proofValue": "hja82F9rKHDTxDnkyTdBoab0EFinHwyhii62Sp+9uAkXFGB/dVTRhRbYT6GEeL4VFinB5JHJ+2HhadD8qy/q1+SLHRUq/rx1JDKBehwyK99FtqQg9s7MkZA9YjMoNWAY09zqdSAtkq5btcTBKnRqLw=="
       }
     }
+  },
+  {
+    "@id": "http://example.org/graph/7",
+    "@graph": {
+      "@context": [
+        "https://www.w3.org/2018/credentials/v1",
+        "https://zkp-ld.org/bbs-termwise-2021.jsonld",
+        "https://schema.org"
+      ],
+      "id": "http://example.org/credentials/7",
+      "type": "VerifiableCredential",
+      "issuer": "did:example:issuer1",
+      "issuanceDate": "2022-04-01T00:00:00Z",
+      "expirationDate": "2023-04-01T00:00:00Z",
+      "credentialSubject": {
+        "id": "did:example:A",
+        "type": "Employee",
+        "name": "John Smith",
+        "birthDate": "1980-01-01",
+        "baseSalary": 5000000,
+        "worksFor": {
+          "id": "did:example:companyX"
+        }
+      },
+      "proof": {
+        "@context": "https://zkp-ld.org/bbs-termwise-2021.jsonld",
+        "type": "BbsTermwiseSignature2021",
+        "created": "2022-12-19T01:56:13Z",
+        "verificationMethod": "did:example:issuer1#bbs-bls-key1",
+        "proofPurpose": "assertionMethod",
+        "proofValue": "q8qjYQZzqGw20CN08YFoRPbSZuPUZnHXKCZcLQ1Ag//QyM5XTp5AmiJ+QcnMzwhzD74ug/AVrO8uoJFlIbbhEiUPKmhxwPdI6TLOpbVIZt9E0OSzDb0BKTHBxrqdemn3XLTxypOItm5b7cxPYwyFjw=="
+      }
+    }
+  },
+  {
+    "@id": "http://example.org/graph/8",
+    "@graph": {
+      "@context": [
+        "https://www.w3.org/2018/credentials/v1",
+        "https://zkp-ld.org/bbs-termwise-2021.jsonld",
+        "https://schema.org"
+      ],
+      "id": "http://example.org/credentials/8",
+      "type": "VerifiableCredential",
+      "issuer": "did:example:issuer2",
+      "issuanceDate": "2022-12-01T00:00:00Z",
+      "expirationDate": "2023-12-01T00:00:00Z",
+      "credentialSubject": {
+        "id": "http://example.org/action/1",
+        "type": "WantAction",
+        "agent": {
+          "id": "did:example:A"
+        },
+        "object": {
+          "id": "http://example.org/house/1"
+        }
+      },
+      "proof": {
+        "@context": "https://zkp-ld.org/bbs-termwise-2021.jsonld",
+        "type": "BbsTermwiseSignature2021",
+        "created": "2022-12-09T09:07:45Z",
+        "verificationMethod": "did:example:issuer2#bbs-bls-key1",
+        "proofPurpose": "assertionMethod",
+        "proofValue": "k9afMe6StL+IVAoYBnv2fcX6ggMrzW3Kt+0qO+mGPj47tWeah0ZcpkIOWPTGTZ3FEkVMRXOHYNz/I0GQFiBtr5pQ7KfDh/Uudeaan3zRS1tXMGqua+xLVE/xZpL//PTgLq6u7308BUHkSA1gm9PeKw=="
+      }
+    }
+  },
+  {
+    "@id": "http://example.org/graph/9",
+    "@graph": {
+      "@context": [
+        "https://www.w3.org/2018/credentials/v1",
+        "https://zkp-ld.org/bbs-termwise-2021.jsonld",
+        "https://schema.org"
+      ],
+      "id": "http://example.org/credentials/9",
+      "type": "VerifiableCredential",
+      "issuer": "did:example:issuer3",
+      "issuanceDate": "2022-11-01T00:00:00Z",
+      "expirationDate": "2023-11-01T00:00:00Z",
+      "credentialSubject": {
+        "id": "http://example.org/house/1",
+        "type": "House",
+        "name": "Awesome House",
+        "price": 10000000
+      },
+      "proof": {
+        "@context": "https://zkp-ld.org/bbs-termwise-2021.jsonld",
+        "type": "BbsTermwiseSignature2021",
+        "created": "2022-12-09T09:08:20Z",
+        "verificationMethod": "did:example:issuer3#bbs-bls-key1",
+        "proofPurpose": "assertionMethod",
+        "proofValue": "rnkdIpZGCFNyWcONUTj+S8oF6ST0mh03cWHjunZf2H9YFZ1HNZGtApCEdbzfDhzuOdKYxnCj2pZ1jdVykcIm2/FhrgrszDmN5hbcBUugr+4iYPDtcnYIepMP4ZP0pYoaOPAaWTjqnSpAUGd1n/7ZBw=="
+      }
+    }
+  },
+  {
+    "@id": "urn:graph:http://example.org/vaccinationCredential/04",
+    "@graph": {
+      "@context": [
+        "https://www.w3.org/2018/credentials/v1",
+        "https://zkp-ld.org/bbs-termwise-2021.jsonld",
+        "https://schema.org",
+        {
+          "Vaccination": "http://example.org/vocab/Vaccination",
+          "isPatientOf": "http://example.org/vocab/isPatientOf",
+          "lotNumber": "http://example.org/vocab/lotNumber",
+          "vaccinationDate": {
+            "@id": "http://example.org/vocab/vaccinationDate",
+            "@type": "xsd:dateTime"
+          },
+          "vaccine": {
+            "@id": "http://example.org/vocab/vaccine",
+            "@type": "@id"
+          }
+        }
+      ],
+      "id": "http://example.org/vaccinationCredential/04",
+      "type": "VerifiableCredential",
+      "issuer": "did:example:issuer1",
+      "issuanceDate": "2022-04-04T00:00:00Z",
+      "expirationDate": "2025-04-04T00:00:00Z",
+      "credentialSubject": {
+        "id": "did:example:xyz",
+        "type": "Person",
+        "name": "John Smith",
+        "isPatientOf": {
+          "type": "Vaccination",
+          "id": "http://example.org/vaccination/04",
+          "vaccinationDate": "2022-04-04T00:00:00Z",
+          "lotNumber": "1111111",
+          "vaccine": "http://example.org/vaccine/987"
+        }
+      },
+      "proof": {
+        "@context": "https://zkp-ld.org/bbs-termwise-2021.jsonld",
+        "type": "BbsTermwiseSignature2021",
+        "created": "2023-02-03T09:46:55Z",
+        "verificationMethod": "did:example:issuer1#bbs-bls-key1",
+        "proofPurpose": "assertionMethod",
+        "proofValue": "srl0BzpD2zCy9iV6beV82zU+F6WnBSFiL7uERojkUNS7K3D1HUNVLlwfAOVvruHIU5PX0qbq1fW7vEz2KjQz8V987tzyNCMBfBv/uJ9/ovQf1iLSF+l8qAwiHWoQcflsBWEB2oBljfaRAFAGnZg1NA=="
+      }
+    }
+  },
+  {
+    "@id": "urn:graph:http://example.org/vaccineInfoCredentials/987",
+    "@graph": {
+      "@context": [
+        "https://www.w3.org/2018/credentials/v1",
+        "https://zkp-ld.org/bbs-termwise-2021.jsonld",
+        "https://schema.org",
+        {
+          "Vaccine": "http://example.org/vocab/Vaccine"
+        }
+      ],
+      "id": "http://example.org/vaccineInfoCredentials/987",
+      "type": "VerifiableCredential",
+      "issuer": "did:example:issuer2",
+      "issuanceDate": "2020-01-01T00:00:00Z",
+      "expirationDate": "2023-12-31T00:00:00Z",
+      "credentialSubject": {
+        "id": "http://example.org/vaccine/987",
+        "type": "Vaccine",
+        "name": "AwesomeVaccine",
+        "manufacturer": {
+          "id": "http://example.org/awesomeCompany"
+        },
+        "status": "active"
+      },
+      "proof": {
+        "@context": "https://zkp-ld.org/bbs-termwise-2021.jsonld",
+        "type": "BbsTermwiseSignature2021",
+        "created": "2023-02-03T09:49:25Z",
+        "verificationMethod": "did:example:issuer2#bbs-bls-key1",
+        "proofPurpose": "assertionMethod",
+        "proofValue": "r3FbeXqzeJe0pSIK3fxwmXXRYOcphcFmF5wSPfo96FdZCch4ZtiwjWH015dZsqvTM2kraU3ah7Dt/bLfgnfYZCrU3blXeROPceBV8P7vJJMAlT9MABRzWWDbaRe/weL+kMWEDNRxcpIXuFPt09WtQg=="
+      }
+    }
   }
 ]
