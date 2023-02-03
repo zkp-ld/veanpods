@@ -103,7 +103,7 @@ The second VC gives us the details of the vaccine identified by `http://example.
 
 These two credentials are represented as the following RDF dataset (represented in N-Quads):
 
-```n-quads
+```turtle
 # VC1
 <http://example.org/vaccinationCredential/04> <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://www.w3.org/2018/credentials#VerifiableCredential> .
 <http://example.org/vaccinationCredential/04> <https://www.w3.org/2018/credentials#credentialSubject> <did:example:xyz> .
@@ -248,7 +248,7 @@ This results are typically rendered as the following human-friendly table:
 
 This VP itself is JSON-LD document so that the officer (verifier) can transform it into the following RDF dataset:
 
-```n-quads
+```turtle
 # derived from VC1
 <http://example.org/vaccinationCredential/04> <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://www.w3.org/2018/credentials#VerifiableCredential> _:b1 .
 <http://example.org/vaccinationCredential/04> <https://www.w3.org/2018/credentials#credentialSubject> <https://zkp-ld.org/.well-known/genid/anonymous/iri#IGDDf_> _:b1 .
