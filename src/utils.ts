@@ -1,30 +1,59 @@
 import { DataFactory } from 'rdf-data-factory';
 import { Engine } from 'quadstore-comunica';
 import * as RDF from '@rdfjs/types';
+import jsonld from 'jsonld';
 import sparqljs from 'sparqljs';
 import { nanoid } from 'nanoid';
 import { Quadstore } from 'quadstore';
-import { parse } from 'path';
+import { BbsTermwiseSignatureProof2021, verifyProofMulti } from '@zkp-ld/rdf-signatures-bbs';
+
+// built-in JSON-LD contexts and sample VCs
+import { customLoader } from "./data/index.js";
+const documentLoader = customLoader;
 
 // ** constants ** //
 
-export const VC_TYPE = 'https://www.w3.org/2018/credentials#VerifiableCredential';
-export const PROOF = 'https://w3id.org/security#proof';
+const VC_TYPE = 'https://www.w3.org/2018/credentials#VerifiableCredential';
+const PROOF = 'https://w3id.org/security#proof';
 const GRAPH_VAR_PREFIX = 'ggggg';  // TBD
-export const ANON_PREFIX = 'https://zkp-ld.org/.well-known/genid/anonymous/';
 const ANONI_PREFIX = 'https://zkp-ld.org/.well-known/genid/anonymous/iri#';
 const ANONB_PREFIX = 'https://zkp-ld.org/.well-known/genid/anonymous/bnid#';
 const ANONL_PREFIX = 'https://zkp-ld.org/.well-known/genid/anonymous/literal#';
+const RDF_TYPE = 'http://www.w3.org/1999/02/22-rdf-syntax-ns#type';
 const NANOID_LEN = 6;
 const BNODE_PREFIX = '_:';
+const CONTEXTS = [
+  'https://www.w3.org/2018/credentials/v1',
+  'https://zkp-ld.org/bbs-termwise-2021.jsonld',
+  'https://schema.org',
+] as unknown as jsonld.ContextDefinition;
+const VC_FRAME =
+{
+  '@context': CONTEXTS,
+  type: 'VerifiableCredential',
+  proof: {}  // explicitly required otherwise `sec:proof` is used instead
+};
 
 // ** types ** //
 
-export type ZkTermBgp = ZkSubjectBgp | ZkPredicateBgp | ZkObjectBgp;
-export type ZkSubjectBgp = sparqljs.IriTerm | sparqljs.VariableTerm;
-export type ZkPredicateBgp = sparqljs.IriTerm | sparqljs.VariableTerm;
-export type ZkObjectBgp = sparqljs.IriTerm | sparqljs.LiteralTerm | sparqljs.VariableTerm;
-export interface ZkTripleBgp {
+type VP =
+  {
+    '@context': any;
+    type: 'VerifiablePresentation';
+    verifiableCredential: jsonld.NodeObject[];
+  };
+const VP_TEMPLATE: VP =
+{
+  '@context': CONTEXTS,
+  type: 'VerifiablePresentation',
+  verifiableCredential: [],
+};
+
+type ZkTermBgp = ZkSubjectBgp | ZkPredicateBgp | ZkObjectBgp;
+type ZkSubjectBgp = sparqljs.IriTerm | sparqljs.VariableTerm;
+type ZkPredicateBgp = sparqljs.IriTerm | sparqljs.VariableTerm;
+type ZkObjectBgp = sparqljs.IriTerm | sparqljs.LiteralTerm | sparqljs.VariableTerm;
+interface ZkTripleBgp {
   subject: ZkSubjectBgp,
   predicate: ZkPredicateBgp,
   object: ZkObjectBgp,
@@ -32,16 +61,16 @@ export interface ZkTripleBgp {
 
 type ZkTerm = ZkSubject | ZkPredicate | ZkObject;
 type ZkSubject = sparqljs.IriTerm | sparqljs.BlankTerm;
-export const isZkSubject =
+const isZkSubject =
   (t: RDF.Term): t is ZkSubject =>
   (t.termType === 'NamedNode'
     || t.termType === 'BlankNode');
 type ZkPredicate = sparqljs.IriTerm;
-export const isZkPredicate =
+const isZkPredicate =
   (t: RDF.Term): t is ZkPredicate =>
     t.termType === 'NamedNode';
 type ZkObject = sparqljs.IriTerm | sparqljs.BlankTerm | sparqljs.LiteralTerm;
-export const isZkObject =
+const isZkObject =
   (t: RDF.Term): t is ZkObject =>
   (t.termType === 'NamedNode'
     || t.termType === 'BlankNode'
@@ -79,15 +108,128 @@ interface FetchResult {
 
 // ** functions ** //
 
-export const isVariableTerm =
+export const processQuery = async (
+  query: string,
+  store: Quadstore,
+  df: DataFactory<RDF.Quad>,
+  engine: Engine):
+  Promise<JsonResults | { "error": string; }> => {
+  // 1. parse zk-SPARQL query and execute SELECT on internal quadstore
+  const queryResult = await fetch(query, store, df, engine);
+  if ('error' in queryResult) {
+    return queryResult;
+  }
+  const {
+    extendedSolutions,
+    revealedCredsArray,
+    requiredVars,
+    anonToTerm
+  } = queryResult;
+
+  // 2. generate VPs
+  const vps: VP[] = [];
+  for (const creds of revealedCredsArray) {
+    // run BBS+
+    const inputDocuments = Array.from(creds,
+      ([_, { wholeDoc, anonymizedDoc, proofs }]) => ({
+        document: wholeDoc.filter((quad) => quad.predicate.value !== PROOF),  // document without `proof` predicate
+        proofs,
+        revealedDocument: anonymizedDoc.filter((quad) => quad.predicate.value !== PROOF),  // document without `proof` predicate
+        anonToTerm
+      }));
+    const suite = new BbsTermwiseSignatureProof2021({
+      useNativeCanonize: false,
+    });
+    const derivedProofs: any = await suite.deriveProofMultiRDF({
+      inputDocuments,
+      documentLoader,
+    });
+
+    // serialize derived VCs as JSON-LD documents
+    const derivedVcs: any[] = [];
+    for (const { document, proof: proofs } of derivedProofs) {
+      // connect document and proofs
+      const documentId = document.find(
+        (quad: RDF.Quad) => quad.predicate.value === RDF_TYPE && quad.object.value === VC_TYPE)
+        .subject;
+      const proofGraphs = [];
+      for (const proof of proofs) {
+        const proofGraphId = df.blankNode();
+        const proofGraph = proof.map((quad: RDF.Quad) =>
+          df.quad(quad.subject, quad.predicate, quad.object, proofGraphId));
+        proofGraphs.push(proofGraph);
+        document.push(df.quad(documentId, df.namedNode(PROOF), proofGraphId));
+      }
+      const cred = document.concat(proofGraphs.flat());
+      // add bnode prefix `_:` to blank node ids
+      const credWithBnodePrefix = addBnodePrefix(cred);
+      const credJson = await jsonld.fromRDF(credWithBnodePrefix);
+      // to compact JSON-LD
+      const credJsonCompact = await jsonld.compact(credJson, CONTEXTS, { documentLoader });
+      // shape it to be a VC
+      const derivedVc: any = await jsonld.frame(
+        credJsonCompact,
+        VC_FRAME,
+        { documentLoader }
+      );
+      derivedVcs.push(derivedVc);
+    }
+
+    // serialize VP
+    const vp = { ...VP_TEMPLATE };
+    vp['verifiableCredential'] = derivedVcs;
+    vps.push(vp);
+
+    // // debug: verify derived VC
+    // // separate document and proofs
+    // const verified = await verifyProofMulti(derivedVcs,
+    //   {
+    //     suite,
+    //     documentLoader,
+    //     purpose: new jsigs.purposes.AssertionProofPurpose()
+    //   });
+    // console.log(`verified: ${JSON.stringify(verified, null, 2)}`);
+  }
+
+  // 3. remove unrevealed bindings from extended solutions
+  const requiredVarNames = requiredVars.map((v) => v.value);
+  const revealedSolutions = isWildcard(requiredVars) ?
+    extendedSolutions :
+    extendedSolutions.map(
+      (extendedSolution) => extendedSolution.filter(
+        (_, key) => requiredVarNames.includes(key.value))
+    );
+
+  // 4. add VPs (or VCs) to each corresponding solutions
+  const revealedSolutionWithVPs = revealedSolutions.map(
+    (revealedSolution, i) =>
+      revealedSolution.set('vp', df.literal(
+        `${JSON.stringify(vps[i], null, 2)}`)));
+
+  // 5. send response
+  let jsonVars: string[];
+  if (isWildcard(requiredVars)) {
+    // SELECT * WHERE {...}
+    jsonVars = extendedSolutions.length >= 1 ?
+      [...extendedSolutions[0].keys()].map((k) => k.value) :
+      [''];
+  } else {
+    // SELECT ?s ?p ?o WHERE {...}
+    jsonVars = requiredVars.map((v) => v.value);
+  }
+  jsonVars.push('vp');
+  return genJsonResults(jsonVars, revealedSolutionWithVPs);
+};
+
+const isVariableTerm =
   (v: sparqljs.Variable): v is sparqljs.VariableTerm =>
     !('expression' in v);
-export const isVariableTerms =
+const isVariableTerms =
   (vs: sparqljs.Variable[]): vs is sparqljs.VariableTerm[] =>
     vs.every((v) => isVariableTerm(v));
 
 // parse zk-SPARQL query
-export const parseQuery =
+const parseQuery =
   (query: string): VarsAndParsedQuery | { error: string } => {
     const parser = new sparqljs.Parser();
     try {
@@ -120,7 +262,7 @@ export const parseQuery =
   }
 
 // extract Basic Graph Pattern (BGP) triples from parsed query
-export const getBgpTriples =
+const getBgpTriples =
   (parsedQuery: ParsedQuery): ZkTripleBgp[] | { error: string } => {
     // validate zk-SPARQL query
     const bgpPatterns = parsedQuery.where?.filter((p) => p.type === 'bgp');
@@ -138,18 +280,19 @@ export const getBgpTriples =
     return bgpTriples;
   }
 
-export const isTripleWithoutPropertyPath =
+const isTripleWithoutPropertyPath =
   (triple: sparqljs.Triple):
     triple is ZkTripleBgp =>
     'type' in triple.predicate && triple.predicate.type === 'path' ? false : true;
 
-export const isTriplesWithoutPropertyPath =
+const isTriplesWithoutPropertyPath =
   (triples: sparqljs.Triple[]):
     triples is ZkTripleBgp[] =>
     triples.map(isTripleWithoutPropertyPath).every(Boolean);
 
-// get extended SPARQL solutions, which are SPARQL solutions with _names of graphs_ where each input BGP triples is included
-export const getExtendedSolutions = async (
+// get extended SPARQL solutions, which are SPARQL solutions with _names of graphs_
+// where each input BGP triples is included
+const getExtendedSolutions = async (
   bgpTriples: sparqljs.Triple[],
   parsedQuery: ParsedQuery,
   df: DataFactory<RDF.Quad>,
@@ -187,7 +330,7 @@ export const getExtendedSolutions = async (
   return extendedSolutions;
 };
 
-export const fetch = async (
+const fetch = async (
   query: string,
   store: Quadstore,
   df: DataFactory<RDF.Quad>,
@@ -240,7 +383,7 @@ export const fetch = async (
           anonymizer)));
 
   const anonToTerm = anonymizer.anonToTerm;
-  
+
   return {
     extendedSolutions,
     revealedCredsArray,
@@ -251,7 +394,7 @@ export const fetch = async (
 
 // get `graphIriToBgpTriple`
 // e.g., { ggggg0: [ (:s1 :p1 :o1), (:s1 :p2 :o2) ], ggggg1: [ (:s1 :p3 :o3 )] }
-export const identifyCreds = (
+const identifyCreds = (
   extendedSolution: RDF.Bindings,
   gVarToBgpTriple: Record<string, ZkTripleBgp>,
 ): IdentifyCredsResultType => {
@@ -265,7 +408,7 @@ export const identifyCreds = (
 };
 
 // get `revealedQuads`
-export const getRevealedQuads = async (
+const getRevealedQuads = async (
   graphIriToBgpTriple: Map<string, ZkTripleBgp[]>,
   bindings: RDF.Bindings,
   vars: sparqljs.VariableTerm[] | [sparqljs.Wildcard],
@@ -299,7 +442,7 @@ export const getRevealedQuads = async (
 };
 
 // get `revealedCreds`
-export const getRevealedCreds = async (
+const getRevealedCreds = async (
   revealedQuads: Map<string, RDF.Quad[]>,
   store: Quadstore,
   df: DataFactory<RDF.Quad>,
@@ -360,7 +503,7 @@ export const getRevealedCreds = async (
   return revealedCreds;
 }
 
-export class Anonymizer {
+class Anonymizer {
   iriToAnonMap: Map<string, sparqljs.IriTerm>;
   bnodeToAnonMap: Map<string, sparqljs.IriTerm>;
   literalToAnonMap: Map<string, sparqljs.LiteralTerm>;
@@ -497,7 +640,7 @@ const anonymizeQuad = (
   }
 );
 
-export const getCredentialMetadata = async (
+const getCredentialMetadata = async (
   graphIri: string,
   df: DataFactory,
   store: Quadstore,
@@ -533,7 +676,7 @@ export const getCredentialMetadata = async (
   return cred;
 };
 
-export const getProofsId = async (
+const getProofsId = async (
   graphIri: string,
   engine: Engine
 ) => {
@@ -550,12 +693,12 @@ export const getProofsId = async (
   return bindingsArray.map((bindings) => bindings.get('proof'));
 };
 
-export const deduplicateQuads = (quads: RDF.Quad[]) =>
+const deduplicateQuads = (quads: RDF.Quad[]) =>
   quads.filter((quad1, index, self) =>
     index === self.findIndex((quad2) => (quad1.equals(quad2))));
 
 // utility function from [string, T][] to Map<string, T[]>
-export const entriesToMap = <T>(entries: [string, T][]) => {
+const entriesToMap = <T>(entries: [string, T][]) => {
   const res = new Map<string, T[]>();
   for (const entry of entries) {
     if (res.has(entry[0])) {
@@ -568,7 +711,7 @@ export const entriesToMap = <T>(entries: [string, T][]) => {
 };
 
 // ref: https://github.com/belayeng/quadstore-comunica/blob/master/spec/src/utils.ts
-export const streamToArray = <T>(source: RDF.ResultStream<T>): Promise<T[]> => {
+const streamToArray = <T>(source: RDF.ResultStream<T>): Promise<T[]> => {
   return new Promise((resolve, reject) => {
     const items: T[] = [];
     source.on('data', (item) => {
@@ -583,73 +726,84 @@ export const streamToArray = <T>(source: RDF.ResultStream<T>): Promise<T[]> => {
   });
 };
 
-export const genJsonResults = (jsonVars: string[], bindingsArray: RDF.Bindings[]) => {
-  type jsonBindingsUriType = {
-    type: 'uri', value: string
-  };
-  type jsonBindingsLiteralType = {
-    type: 'literal', value: string, 'xml:lang'?: string, datatype?: string
-  };
-  type jsonBindingsBnodeType = {
-    type: 'bnode', value: string
-  };
-  type jsonBindingsType = jsonBindingsUriType | jsonBindingsLiteralType | jsonBindingsBnodeType;
-  const isNotNullOrUndefined = <T>(v?: T | null): v is T => null != v;
+type JsonBindingsUriType = {
+  type: 'uri', value: string
+};
+type JsonBindingsLiteralType = {
+  type: 'literal', value: string, 'xml:lang'?: string, datatype?: string
+};
+type JsonBindingsBnodeType = {
+  type: 'bnode', value: string
+};
+type JsonBindingsType = JsonBindingsUriType | JsonBindingsLiteralType | JsonBindingsBnodeType;
+type JsonResults = {
+  head: {
+    vars: string[],
+  },
+  results: {
+    bindings: {
+      [k: string]: JsonBindingsType,
+    }[]
+  }
+};
 
-  const jsonBindingsArray = [];
-  for (const bindings of bindingsArray) {
-    const jsonBindingsEntries: [string, jsonBindingsType][] = [...bindings].map(([k, v]) => {
-      let value: jsonBindingsType;
-      if (v.termType === 'Literal') {
-        if (v.language !== '') {
+const genJsonResults =
+  (jsonVars: string[], bindingsArray: RDF.Bindings[]): JsonResults => {
+    const isNotNullOrUndefined = <T>(v?: T | null): v is T => null != v;
+
+    const jsonBindingsArray = [];
+    for (const bindings of bindingsArray) {
+      const jsonBindingsEntries: [string, JsonBindingsType][] = [...bindings].map(([k, v]) => {
+        let value: JsonBindingsType;
+        if (v.termType === 'Literal') {
+          if (v.language !== '') {
+            value = {
+              type: 'literal',
+              value: v.value,
+              'xml:lang': v.language
+            };
+          } else if (v.datatype.value === 'http://www.w3.org/2001/XMLSchema#string') {
+            value = {
+              type: 'literal',
+              value: v.value
+            };
+          } else {
+            value = {
+              type: 'literal',
+              value: v.value,
+              datatype: v.datatype.value
+            };
+          }
+        } else if (v.termType === 'NamedNode') {
           value = {
-            type: 'literal',
-            value: v.value,
-            'xml:lang': v.language
+            type: 'uri',
+            value: v.value
           };
-        } else if (v.datatype.value === 'http://www.w3.org/2001/XMLSchema#string') {
+        } else if (v.termType === 'BlankNode') {
           value = {
-            type: 'literal',
+            type: 'bnode',
             value: v.value
           };
         } else {
-          value = {
-            type: 'literal',
-            value: v.value,
-            datatype: v.datatype.value
-          };
-        }
-      } else if (v.termType === 'NamedNode') {
-        value = {
-          type: 'uri',
-          value: v.value
+          return undefined;
         };
-      } else if (v.termType === 'BlankNode') {
-        value = {
-          type: 'bnode',
-          value: v.value
-        };
-      } else {
-        return undefined;
-      };
-      return [k.value, value];
-    }).filter(isNotNullOrUndefined) as [string, jsonBindingsType][];
-    const jsonBindings = Object.fromEntries(jsonBindingsEntries);
-    jsonBindingsArray.push(jsonBindings);
-  }
-  const jsonResults = {
-    "head": { "vars": jsonVars },
-    "results": {
-      "bindings": jsonBindingsArray
+        return [k.value, value];
+      }).filter(isNotNullOrUndefined) as [string, JsonBindingsType][];
+      const jsonBindings = Object.fromEntries(jsonBindingsEntries);
+      jsonBindingsArray.push(jsonBindings);
     }
-  };
-  return jsonResults;
-}
+    return {
+      "head": { "vars": jsonVars },
+      "results": {
+        "bindings": jsonBindingsArray
+      }
+    };
+  }
 
-export const isWildcard = (vars: sparqljs.Variable[] | [sparqljs.Wildcard]): vars is [sparqljs.Wildcard] =>
+const isWildcard = (vars: sparqljs.Variable[] | [sparqljs.Wildcard]): vars is [sparqljs.Wildcard] =>
   vars.length === 1 && 'value' in vars[0] && vars[0].value === '*';
 
-export const addBnodePrefix = (quad: RDF.Quad | RDF.Quad[]) => {
+const addBnodePrefix = (quad: RDF.Quad | RDF.Quad[]) => {
   const _addBnodePrefix = (quad: RDF.Quad) => {
     if (quad.subject.termType === 'BlankNode'
       && !quad.subject.value.startsWith(BNODE_PREFIX)) {
@@ -667,4 +821,66 @@ export const addBnodePrefix = (quad: RDF.Quad | RDF.Quad[]) => {
   }
 
   return Array.isArray(quad) ? quad.map((q) => _addBnodePrefix(q)) : _addBnodePrefix(quad);
+}
+
+// ** functions for standard SPARQL endpoint (for debug) **
+
+const respondToSelectQuery = async (query: string, parsedQuery: RDF.QueryBindings<RDF.AllMetadataSupport>) => {
+  const bindingsStream = await parsedQuery.execute();
+  const bindingsArray = await streamToArray(bindingsStream);
+
+  // // extract variables from SELECT query
+  // const varsAndParsedQuery = parseQuery(query);
+  // if ('error' in varsAndParsedQuery) {
+  //   throw new Error(varsAndParsedQuery.error);
+  // }
+  // const vars = varsAndParsedQuery.vars;
+
+  // // send response
+  // let jsonVars: string[];
+  // if (vars.length === 1 && 'value' in vars[0] && vars[0].value === '*') {
+  //   // SELECT * WHERE {...}
+  //   jsonVars = bindingsArray.length >= 1 ? [...bindingsArray[0].keys()].map((k) => k.value) : [''];
+  // } else {
+  //   // SELECT ?s ?p ?o WHERE {...}
+  //   jsonVars = vars.map((v) => v.value);
+  // }
+
+  let jsonVars = bindingsArray.length >= 1 ? [...bindingsArray[0].keys()].map((k) => k.value) : [''];
+  return { jsonVars, bindingsArray };
+};
+
+const respondToConstructQuery = async (parsedQuery: RDF.QueryQuads<RDF.AllMetadataSupport>) => {
+  const quadsStream = await parsedQuery.execute();
+  const quadsArray = await streamToArray(quadsStream);
+  const quadsArrayWithBnodePrefix = addBnodePrefix(quadsArray);
+  const quadsJsonld = await jsonld.fromRDF(quadsArrayWithBnodePrefix);
+  const quadsJsonldCompact = await jsonld.compact(quadsJsonld, CONTEXTS, { documentLoader });
+  return quadsJsonldCompact;
+};
+
+export const processSparqlQuery = async (
+  query: string,
+  engine: Engine):
+  Promise<JsonResults | jsonld.NodeObject | string> => {
+  // parse query
+  let parsedQuery: RDF.Query<RDF.AllMetadataSupport>;
+  try {
+    parsedQuery = await engine.query(query, { unionDefaultGraph: true });
+  } catch (error) {
+    return "malformed query";
+  }
+
+  // execute query
+  if (parsedQuery.resultType === 'bindings') {
+    const { jsonVars, bindingsArray } = await respondToSelectQuery(query, parsedQuery)
+    return genJsonResults(jsonVars, bindingsArray);
+  } else if (parsedQuery.resultType === 'quads') {
+    return await respondToConstructQuery(parsedQuery);
+  } else if (parsedQuery.resultType === 'boolean') {
+    const askResult = await parsedQuery.execute();
+    return { head: {}, boolean: askResult };
+  } else {
+    return "invalid SPARQL query";
+  }
 }
