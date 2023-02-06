@@ -5,7 +5,8 @@ import { MemoryLevel } from 'memory-level';
 import { DataFactory } from 'rdf-data-factory';
 import { Quadstore } from 'quadstore';
 import { Engine } from 'quadstore-comunica';
-import { processQuery, processSparqlQuery } from './utils.js';
+import { processQuery } from './processor.js';
+import { processSparqlQuery } from './utils.js';
 
 // built-in JSON-LD contexts and sample VCs
 import { customLoader, sampleVcs } from "./data/index.js";
