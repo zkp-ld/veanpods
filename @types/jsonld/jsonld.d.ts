@@ -231,7 +231,7 @@ type Keyword = {
     '@set': OrArray<null | boolean | number | string | NodeObject | ValueObject>;
     '@type': string;
     '@value': null | boolean | number | string;
-    '@version': '1.1';
+    '@version': number;
     '@vocab': string | null;
 };
 
