@@ -1,15 +1,13 @@
-import jsonld from 'jsonld';
-import sparqljs from 'sparqljs';
-import * as RDF from '@rdfjs/types';
+import type * as RDF from '@rdfjs/types';
+import type jsonld from 'jsonld';
+import type sparqljs from 'sparqljs';
 
-export type VP =
-  {
-    '@context': any;
-    type: 'VerifiablePresentation';
-    verifiableCredential: jsonld.NodeObject[];
-  };
+export interface VP {
+  '@context': unknown;
+  type: 'VerifiablePresentation';
+  verifiableCredential: jsonld.NodeObject[];
+}
 
-type ZkTermBgp = ZkSubjectBgp | ZkPredicateBgp | ZkObjectBgp;
 type ZkSubjectBgp = sparqljs.IriTerm | sparqljs.VariableTerm;
 type ZkPredicateBgp = sparqljs.IriTerm | sparqljs.VariableTerm;
 type ZkObjectBgp = sparqljs.IriTerm | sparqljs.LiteralTerm | sparqljs.VariableTerm;
@@ -24,14 +22,14 @@ export type ZkSubject = sparqljs.IriTerm | sparqljs.BlankTerm;
 export type ZkPredicate = sparqljs.IriTerm;
 export type ZkObject = sparqljs.IriTerm | sparqljs.BlankTerm | sparqljs.LiteralTerm;
 
-export type IdentifyCredsResultType = {
+export interface IdentifyCredsResultType {
   extendedSolution: RDF.Bindings,
   graphIriToBgpTriple: Map<string, ZkTripleBgp[]>,
-};
+}
 
 export type ParsedQuery = sparqljs.SelectQuery | sparqljs.AskQuery;
 
-export type VarsAndParsedQuery = {
+export interface VarsAndParsedQuery {
   requiredVars: sparqljs.VariableTerm[] | [sparqljs.Wildcard],
   parsedQuery: ParsedQuery,
 }
@@ -49,28 +47,26 @@ export interface RevealedCreds {
 
 export interface FetchResult {
   extendedSolutions: RDF.Bindings[];
-  revealedCredsArray: Map<string, RevealedCreds>[];
+  revealedCredsArray: Array<Map<string, RevealedCreds>>;
   requiredVars: sparqljs.VariableTerm[] | [sparqljs.Wildcard];
   anonToTerm: Map<string, ZkTerm>;
 };
 
-type JsonBindingsUriType = {
+interface JsonBindingsUriType {
   type: 'uri', value: string
-};
-type JsonBindingsLiteralType = {
+}
+interface JsonBindingsLiteralType {
   type: 'literal', value: string, 'xml:lang'?: string, datatype?: string
-};
-type JsonBindingsBnodeType = {
+}
+interface JsonBindingsBnodeType {
   type: 'bnode', value: string
-};
+}
 export type JsonBindingsType = JsonBindingsUriType | JsonBindingsLiteralType | JsonBindingsBnodeType;
-export type JsonResults = {
+export interface JsonResults {
   head: {
     vars: string[],
   },
   results: {
-    bindings: {
-      [k: string]: JsonBindingsType,
-    }[]
+    bindings: Array<Record<string, JsonBindingsType>>
   }
-};
+}

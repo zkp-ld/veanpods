@@ -1,9 +1,8 @@
-import { DataFactory } from 'rdf-data-factory';
-import * as RDF from '@rdfjs/types';
-import sparqljs from 'sparqljs';
+import type * as RDF from '@rdfjs/types';
 import { nanoid } from 'nanoid';
-
-import { ZkObject, ZkPredicate, ZkSubject, ZkTerm, ZkTripleBgp } from './types';
+import { type DataFactory } from 'rdf-data-factory';
+import type sparqljs from 'sparqljs';
+import { type ZkObject, type ZkPredicate, type ZkSubject, type ZkTerm, type ZkTripleBgp } from './types';
 import { isZkObject, isZkPredicate, isZkSubject } from './utils.js';
 
 const ANONI_PREFIX = 'https://zkp-ld.org/.well-known/genid/anonymous/iri#';
@@ -26,17 +25,17 @@ export class Anonymizer {
     this.df = df;
   }
 
-  private _genKey = (val: ZkTerm) =>
+  private readonly _genKey = (val: ZkTerm): string =>
     val.termType === 'Literal' ?
       `${val.value}:${nanoid(NANOID_LEN)}` :
       `${val.value}`;
 
-  anonymize = (val: ZkSubject | ZkPredicate) => {
+  anonymize = (val: ZkSubject | ZkPredicate): sparqljs.IriTerm => {
     const key = this._genKey(val);
     let anon: sparqljs.IriTerm;
     if (val.termType === 'NamedNode') {
       const result = this.iriToAnonMap.get(key);
-      if (result != undefined) {
+      if (result !== undefined) {
         return result;
       }
       const anonIri = `${ANONI_PREFIX}${nanoid(NANOID_LEN)}`;
@@ -45,7 +44,7 @@ export class Anonymizer {
       this.anonToTerm.set(anonIri, val);
     } else {
       const result = this.bnodeToAnonMap.get(key);
-      if (result != undefined) {
+      if (result !== undefined) {
         return result;
       }
       const anonBnid = `${ANONB_PREFIX}${nanoid(NANOID_LEN)}`;
@@ -53,10 +52,11 @@ export class Anonymizer {
       this.bnodeToAnonMap.set(key, anon);
       this.anonToTerm.set(anonBnid, val);
     }
+
     return anon;
   };
 
-  get = (val: ZkSubject | ZkPredicate) => {
+  get = (val: ZkSubject | ZkPredicate): sparqljs.IriTerm | undefined => {
     const key = this._genKey(val);
     if (val.termType === 'NamedNode') {
       return this.iriToAnonMap.get(key);
@@ -65,13 +65,13 @@ export class Anonymizer {
     }
   };
 
-  anonymizeObject = (val: ZkObject) => {
+  anonymizeObject = (val: ZkObject): ZkObject => {
     if (val.termType === 'NamedNode' || val.termType === 'BlankNode') {
       return this.anonymize(val);
     }
     const key = this._genKey(val);
     const result = this.literalToAnonMap.get(key);
-    if (result != undefined) {
+    if (result !== undefined) {
       return result;
     }
     const anonLiteral = `${ANONL_PREFIX}${nanoid(NANOID_LEN)}`;
@@ -79,10 +79,11 @@ export class Anonymizer {
     const anon = this.df.literal(anonLiteral, languageOrDatatype) as sparqljs.LiteralTerm;
     this.literalToAnonMap.set(key, anon);
     this.anonToTerm.set(anonLiteral, val);
+
     return anon;
   };
 
-  getObject = (val: ZkObject) => {
+  getObject = (val: ZkObject): ZkObject | undefined => {
     const key = this._genKey(val);
     if (val.termType === 'NamedNode' || val.termType === 'BlankNode') {
       return this.get(val);
@@ -98,7 +99,7 @@ export const anonymizeQuad = (
   bindings: RDF.Bindings,
   df: DataFactory<RDF.Quad>,
   anonymizer: Anonymizer,
-) => bgpTriples.flatMap(
+): RDF.Quad[] => bgpTriples.flatMap(
   (triple) => {
     let subject: RDF.Term | undefined;
     if (triple.subject.termType !== 'Variable') {
@@ -107,7 +108,7 @@ export const anonymizeQuad = (
       subject = bindings.get(triple.subject);
     } else {
       const val = bindings.get(triple.subject);
-      if (val != undefined && isZkSubject(val)) {
+      if (val !== undefined && isZkSubject(val)) {
         subject = anonymizer.anonymize(val);
       }
     }
@@ -119,7 +120,7 @@ export const anonymizeQuad = (
       predicate = bindings.get(triple.predicate);
     } else {
       const val = bindings.get(triple.predicate);
-      if (val != undefined && isZkPredicate(val)) {
+      if (val !== undefined && isZkPredicate(val)) {
         predicate = anonymizer.anonymize(val);
       }
     }
@@ -131,16 +132,16 @@ export const anonymizeQuad = (
       object = bindings.get(triple.object);
     } else {
       const val = bindings.get(triple.object);
-      if (val != undefined && isZkObject(val)) {
+      if (val !== undefined && isZkObject(val)) {
         object = anonymizer.anonymizeObject(val);
       }
     }
 
     const graph = df.defaultGraph();
 
-    if (subject != undefined && isZkSubject(subject)
-      && predicate != undefined && isZkPredicate(predicate)
-      && object != undefined && isZkObject(object)) {
+    if (subject !== undefined && isZkSubject(subject)
+      && predicate !== undefined && isZkPredicate(predicate)
+      && object !== undefined && isZkObject(object)) {
       return [df.quad(subject, predicate, object, graph)];
     } else {
       return []

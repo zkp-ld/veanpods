@@ -1,19 +1,22 @@
-import { DataFactory } from 'rdf-data-factory';
-import { Engine } from 'quadstore-comunica';
-import * as RDF from '@rdfjs/types';
+import type * as RDF from '@rdfjs/types';
+import { BbsTermwiseSignatureProof2021 } from '@zkp-ld/rdf-signatures-bbs';
 import jsonld from 'jsonld';
+import { customAlphabet } from 'nanoid';
+import { type Quadstore } from 'quadstore';
+import { type Engine } from 'quadstore-comunica';
+import { type DataFactory } from 'rdf-data-factory';
 import sparqljs from 'sparqljs';
-import { Quadstore } from 'quadstore';
-import { BbsTermwiseSignatureProof2021, verifyProofMulti } from '@zkp-ld/rdf-signatures-bbs';
-import { FetchResult, IdentifyCredsResultType, JsonResults, ParsedQuery, RevealedCreds, VP, ZkTripleBgp } from './types';
-import { addBnodePrefix, entriesToMap, genJsonResults, getBgpTriples, getCredentialMetadata, getProofsId, isWildcard, isZkObject, isZkPredicate, isZkSubject, parseQuery, streamToArray } from './utils.js';
 import { anonymizeQuad, Anonymizer } from './anonymizer.js';
+import { customLoader } from "./data/index.js";
+import { type FetchResult, type IdentifyCredsResultType, type JsonResults, type ParsedQuery, type RevealedCreds, type VP, type ZkTripleBgp } from './types';
+import { addBnodePrefix, entriesToMap, genJsonResults, getBgpTriples, getCredentialMetadata, getProofsId, isWildcard, isZkObject, isZkPredicate, isZkSubject, parseQuery, streamToArray } from './utils.js';
 
 // built-in JSON-LD contexts and sample VCs
-import { customLoader } from "./data/index.js";
 const documentLoader = customLoader;
 
 // ** constants ** //
+const GRAPH_VAR_LENGTH = 20;
+const graphVarGenerator = customAlphabet('abcdefghijklmnopqrstuvwxyz', GRAPH_VAR_LENGTH);
 const PROOF = 'https://w3id.org/security#proof';
 const RDF_TYPE = 'http://www.w3.org/1999/02/22-rdf-syntax-ns#type';
 const VC_TYPE = 'https://www.w3.org/2018/credentials#VerifiableCredential';
@@ -22,7 +25,6 @@ const CONTEXTS = [
   'https://zkp-ld.org/bbs-termwise-2021.jsonld',
   'https://schema.org',
 ] as unknown as jsonld.ContextDefinition;
-const GRAPH_VAR_PREFIX = 'ggggg';  // TBD
 const VC_FRAME =
 {
   '@context': CONTEXTS,
@@ -108,7 +110,7 @@ export const processQuery = async (
 
     // serialize VP
     const vp = { ...VP_TEMPLATE };
-    vp['verifiableCredential'] = derivedVcs;
+    vp.verifiableCredential = derivedVcs;
     vps.push(vp);
 
     // // debug: verify derived VC
@@ -149,6 +151,7 @@ export const processQuery = async (
     jsonVars = requiredVars.map((v) => v.value);
   }
   jsonVars.push('vp');
+
   return genJsonResults(jsonVars, revealedSolutionWithVPs);
 };
 
@@ -171,15 +174,17 @@ const executeInternalQueries = async (
     return bgpTriples; // TBD
   }
 
-  const gVarToBgpTriple: Record<string, ZkTripleBgp>
-    = Object.assign({}, ...bgpTriples.map((triple, i) => ({
-      [`${GRAPH_VAR_PREFIX}${i}`]: triple
-    })));
+  // generate random prefix for temporary variables of internal queries
+  const graphVarPrefix = graphVarGenerator();
+
+  // pairs a temporary variable and its corresponding BGP triple
+  const graphVarAndBgpTriple: Array<[string, ZkTripleBgp]> =
+    bgpTriples.map((triple, i) => [`${graphVarPrefix}${i}`, triple]);
 
   // get extended bindings, i.e.,
   // bindings (SELECT query responses) + associated graph names corresponding to each BGP triples
   const extendedSolutions = await getExtendedSolutions(
-    bgpTriples, parsedQuery, df, engine);
+    bgpTriples, parsedQuery, graphVarPrefix, df, engine);
 
   // get revealed and anonymized credentials
   const anonymizer = new Anonymizer(df);
@@ -188,7 +193,7 @@ const executeInternalQueries = async (
       .map((extendedSolution) =>
         identifyCreds(
           extendedSolution,
-          gVarToBgpTriple))
+          graphVarAndBgpTriple))
       .map(({ extendedSolution, graphIriToBgpTriple }) =>
         getRevealedQuads(
           graphIriToBgpTriple,
@@ -197,8 +202,8 @@ const executeInternalQueries = async (
           df,
           anonymizer))
       .map(async (revealedQuads) =>
-        getRevealedCreds(
-          await revealedQuads,
+        await getRevealedCreds(
+          revealedQuads,
           store,
           df,
           engine,
@@ -214,29 +219,48 @@ const executeInternalQueries = async (
   };
 }
 
-// get `graphIriToBgpTriple`
-// e.g., { ggggg0: [ (:s1 :p1 :o1), (:s1 :p2 :o2) ], ggggg1: [ (:s1 :p3 :o3 )] }
+// get `graphIriToBgpTriple` from extended solution and gVarToBgpTriple
+//
+// example parameters:
+//   extendedSolution (partially) = 
+//     { "ggggg0": "http://example.org/graph0",
+//       "ggggg1": "http://example.org/graph1",
+//       "ggggg2": "http://example.org/graph0" }
+//   gVarToBgpTriple =
+//     { "ggggg0": (:s0 :p0 :o0),
+//       "ggggg1": (:s1 :p1 :o1),
+//       "ggggg2": (:s2 :p2 :o2) }
 const identifyCreds = (
   extendedSolution: RDF.Bindings,
-  gVarToBgpTriple: Record<string, ZkTripleBgp>,
+  gVarAndBgpTriple: Array<[string, ZkTripleBgp]>,
 ): IdentifyCredsResultType => {
-  const graphIriAndGraphVars = [...extendedSolution]
-    .filter((b) => b[0].value.startsWith(GRAPH_VAR_PREFIX))
-    .map(([gVar, gIri]) => [gIri.value, gVar.value]);
-  const graphIriAndBgpTriples: [string, ZkTripleBgp][] = graphIriAndGraphVars
-    .map(([gIri, gVar]) => [gIri, gVarToBgpTriple[gVar]]);
+  // graphIriAndBgpTriples =
+  //   [ [ "http://example.org/graph0", (:s0 :p0 :o0) ],
+  //     [ "http://example.org/graph1", (:s1 :p1 :o1) ],
+  //     [ "http://example.org/graph0", (:s2 :p2 :o2) ] ]
+  const graphIriAndBgpTriples: Array<[string, ZkTripleBgp]> = [];
+  for (const [gVar, bgpTriple] of gVarAndBgpTriple) {
+    const uri = extendedSolution.get(gVar);
+    if (uri === undefined || uri.termType !== "NamedNode") continue;
+    graphIriAndBgpTriples.push([uri.value, bgpTriple]);
+  };
+
+  // graphIriToBgpTriple =
+  //   { "http://example.org/graph0": [ (:s0 :p0 :o0), (:s2 :p2 :o2) ],
+  //     "http://example.org/graph1": [ (:s1 :p1 :o1 ) ] }
   const graphIriToBgpTriple = entriesToMap(graphIriAndBgpTriples);
+
   return ({ extendedSolution, graphIriToBgpTriple });
 };
 
 // get `revealedQuads`
-const getRevealedQuads = async (
+const getRevealedQuads = (
   graphIriToBgpTriple: Map<string, ZkTripleBgp[]>,
   bindings: RDF.Bindings,
   vars: sparqljs.VariableTerm[] | [sparqljs.Wildcard],
   df: DataFactory<RDF.Quad>,
   anonymizer: Anonymizer,
-) => {
+): Map<string, RDF.Quad[]> => {
   const result = new Map<string, RDF.Quad[]>();
   for (const [credGraphIri, bgpTriples] of graphIriToBgpTriple.entries()) {
     const revealedQuads = bgpTriples.flatMap((triple) => {
@@ -247,9 +271,9 @@ const getRevealedQuads = async (
       const object = triple.object.termType === 'Variable'
         ? bindings.get(triple.object) : triple.object;
       const graph = df.defaultGraph()
-      if (subject != undefined && isZkSubject(subject)
-        && predicate != undefined && isZkPredicate(predicate)
-        && object != undefined && isZkObject(object)) {
+      if (subject !== undefined && isZkSubject(subject)
+        && predicate !== undefined && isZkPredicate(predicate)
+        && object !== undefined && isZkObject(object)) {
         return [df.quad(subject, predicate, object, graph)];
       } else {
         return [];
@@ -260,6 +284,7 @@ const getRevealedQuads = async (
       : anonymizeQuad(bgpTriples, vars, bindings, df, anonymizer);
     result.set(credGraphIri, anonymizedQuads);
   }
+
   return result;
 };
 
@@ -270,7 +295,7 @@ const getRevealedCreds = async (
   df: DataFactory<RDF.Quad>,
   engine: Engine,
   anonymizer: Anonymizer,
-) => {
+): Promise<Map<string, RevealedCreds>> => {
   const revealedCreds = new Map<string, RevealedCreds>();
   for (const [graphIri, quads] of revealedQuads) {
     // get whole creds
@@ -285,12 +310,13 @@ const getRevealedCreds = async (
     const proofs = await Promise.all(
       (await getProofsId(graphIri, engine)).flatMap(
         async (proofId) => {
-          if (proofId == undefined) {
+          if (proofId === undefined) {
             return [];
           }
           const proof = await store.get({
             graph: df.namedNode(proofId.value)
           });
+
           return proof.items;
         }));
 
@@ -306,15 +332,16 @@ const getRevealedCreds = async (
         anonymizer.get(quad.predicate) : quad.predicate;
       const object = isZkObject(quad.object) ?
         anonymizer.getObject(quad.object) : quad.object;
+
       return df.quad(
-        subject != undefined ? subject : quad.subject,
-        predicate != undefined ? predicate : quad.predicate,
-        object != undefined ? object : quad.object,
+        subject !== undefined ? subject : quad.subject,
+        predicate !== undefined ? predicate : quad.predicate,
+        object !== undefined ? object : quad.object,
         df.defaultGraph(),
       );
     });
     const anonymizedDoc =
-      metadata == undefined ? quads : quads.concat(anonymizedMetadata);
+      metadata === undefined ? quads : quads.concat(anonymizedMetadata);
 
     revealedCreds.set(graphIri, {
       wholeDoc,
@@ -322,6 +349,7 @@ const getRevealedCreds = async (
       proofs,
     });
   }
+
   return revealedCreds;
 }
 
@@ -330,9 +358,10 @@ const getRevealedCreds = async (
 const getExtendedSolutions = async (
   bgpTriples: sparqljs.Triple[],
   parsedQuery: ParsedQuery,
+  graphVarPrefix: string,
   df: DataFactory<RDF.Quad>,
   engine: Engine
-) => {
+): Promise<RDF.Bindings[]> => {
   // construct an extended SPARQL query
   const extendedGraphPatterns: sparqljs.GraphPattern[]
     = bgpTriples.map((triple, i) => (
@@ -342,7 +371,7 @@ const getExtendedSolutions = async (
           type: 'bgp',
           triples: [triple]
         }],
-        name: df.variable(`${GRAPH_VAR_PREFIX}${i}`),
+        name: df.variable(`${graphVarPrefix}${i}`),
       }
     ));
   const where = parsedQuery
@@ -362,5 +391,6 @@ const getExtendedSolutions = async (
   const generatedQuery = generator.stringify(extendedQuery);
   const bindingsStream = await engine.queryBindings(generatedQuery, { unionDefaultGraph: true });
   const extendedSolutions = await streamToArray(bindingsStream);
+
   return extendedSolutions;
 };

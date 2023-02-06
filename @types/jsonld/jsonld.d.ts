@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/consistent-indexed-object-style */
 /*
  * Types from the jsonld Specification:
  * https://www.w3.org/TR/json-ld11/
@@ -8,7 +9,7 @@
  * Disable automatic exporting.
  * Some of these declarations are not needed externally.
  */
-export {};
+export { };
 
 /**
  * A JSON-LD document MUST be valid JSON text as described in [RFC8259],
@@ -33,26 +34,26 @@ export interface NodeObject {
     '@graph'?: OrArray<NodeObject> | undefined;
     '@nest'?: OrArray<JsonObject> | undefined;
     '@type'?: OrArray<Keyword['@type']> | undefined;
-    '@reverse'?: {[key: string]: Keyword['@reverse']} | undefined;
+    '@reverse'?: { [key: string]: Keyword['@reverse'] } | undefined;
     '@index'?: Keyword['@index'] | undefined;
     [key: string]:
-        | OrArray<
-            | null
-            | boolean
-            | number
-            | string
-            | NodeObject
-            | GraphObject
-            | ValueObject
-            | ListObject
-            | SetObject
-        >
-        | LanguageMap
-        | IndexMap
-        | IncludedBlock
-        | IdMap
-        | TypeMap
-        | NodeObject[keyof NodeObject];
+    | OrArray<
+        | null
+        | boolean
+        | number
+        | string
+        | NodeObject
+        | GraphObject
+        | ValueObject
+        | ListObject
+        | SetObject
+    >
+    | LanguageMap
+    | IndexMap
+    | IncludedBlock
+    | IdMap
+    | TypeMap
+    | NodeObject[keyof NodeObject];
 }
 
 /**
@@ -170,10 +171,10 @@ export interface ContextDefinition {
     '@version'?: Keyword['@version'] | undefined;
     '@vocab'?: Keyword['@vocab'] | undefined;
     [key: string]:
-        | null
-        | string
-        | ExpandedTermDefinition
-        | ContextDefinition[keyof ContextDefinition];
+    | null
+    | string
+    | ExpandedTermDefinition
+    | ContextDefinition[keyof ContextDefinition];
 }
 
 /**
@@ -205,13 +206,13 @@ export type ExpandedTermDefinition = {
  * Not for export.
  * @see https://www.w3.org/TR/json-ld/#keywords
  */
-// tslint:disable-next-line:interface-over-type-literal
+// eslint-disable-next-line @typescript-eslint/consistent-type-definitions
 type Keyword = {
     '@base': string | null;
     '@container':
-        | OrArray<'@list' | '@set' | ContainerType>
-        | ContainerTypeArray
-        | null;
+    | OrArray<'@list' | '@set' | ContainerType>
+    | ContainerTypeArray
+    | null;
     '@context': OrArray<null | string | ContextDefinition>;
     '@direction': 'ltr' | 'rtl' | null;
     '@graph': OrArray<ValueObject | NodeObject>;
@@ -249,21 +250,21 @@ type ContainerType =
 type ContainerTypeArray =
     | ['@graph', '@id']
     | ['@id', '@graph']
-    | ['@set',   '@graph', '@id']
-    | ['@set',   '@id',    '@graph']
-    | ['@graph', '@set',   '@id']
-    | ['@id',    '@set',   '@graph']
-    | ['@graph', '@id',    '@set']
-    | ['@id',    '@graph', '@set']
+    | ['@set', '@graph', '@id']
+    | ['@set', '@id', '@graph']
+    | ['@graph', '@set', '@id']
+    | ['@id', '@set', '@graph']
+    | ['@graph', '@id', '@set']
+    | ['@id', '@graph', '@set']
     | ['@set', ContainerType]
     | [ContainerType, '@set']
-;
+    ;
 
 /*
  * JSON Types
  * (not for export)
  */
 type JsonPrimitive = string | number | boolean | null;
-interface JsonArray extends Array<JsonValue> {}
+interface JsonArray extends Array<JsonValue> { }
 interface JsonObject { [key: string]: JsonValue | undefined; }
 type JsonValue = JsonPrimitive | JsonArray | JsonObject;

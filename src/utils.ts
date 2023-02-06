@@ -1,13 +1,22 @@
-import { DataFactory } from 'rdf-data-factory';
-import { Engine } from 'quadstore-comunica';
-import * as RDF from '@rdfjs/types';
+import type * as RDF from '@rdfjs/types';
 import jsonld from 'jsonld';
+import { type Quadstore } from 'quadstore';
+import { type Engine } from 'quadstore-comunica';
+import { type DataFactory } from 'rdf-data-factory';
 import sparqljs from 'sparqljs';
-import { Quadstore } from 'quadstore';
-import { JsonBindingsType, JsonResults, ParsedQuery, VarsAndParsedQuery, VP, ZkSubject, ZkPredicate, ZkObject, ZkTripleBgp } from './types';
 
 // built-in JSON-LD contexts and sample VCs
 import { customLoader } from "./data/index.js";
+import {
+  type JsonBindingsType,
+  type JsonResults,
+  type ParsedQuery,
+  type VarsAndParsedQuery,
+  type ZkSubject,
+  type ZkPredicate,
+  type ZkObject,
+  type ZkTripleBgp
+} from './types';
 const documentLoader = customLoader;
 
 // ** constants ** //
@@ -96,7 +105,7 @@ export const getBgpTriples =
 const isTripleWithoutPropertyPath =
   (triple: sparqljs.Triple):
     triple is ZkTripleBgp =>
-    'type' in triple.predicate && triple.predicate.type === 'path' ? false : true;
+    !('type' in triple.predicate && triple.predicate.type === 'path');
 
 const isTriplesWithoutPropertyPath =
   (triples: sparqljs.Triple[]):
@@ -108,7 +117,7 @@ export const getCredentialMetadata = async (
   df: DataFactory,
   store: Quadstore,
   engine: Engine,
-) => {
+): Promise<RDF.Quad[] | undefined> => {
   const query = `
   SELECT ?cred
   WHERE {
@@ -123,7 +132,7 @@ export const getCredentialMetadata = async (
     return undefined;
   }
   const credId = credIds[0];
-  if (credId == undefined
+  if (credId === undefined
     || (credId.termType !== 'NamedNode'
       && credId.termType !== 'BlankNode')) {
     return undefined;
@@ -136,13 +145,14 @@ export const getCredentialMetadata = async (
       quad.predicate,
       quad.object,
       df.defaultGraph()));
+
   return cred;
 };
 
 export const getProofsId = async (
   graphIri: string,
   engine: Engine
-) => {
+): Promise<Array<RDF.Term | undefined>> => {
   const query = `
   SELECT ?proof
   WHERE {
@@ -153,15 +163,12 @@ export const getProofsId = async (
   }`;
   const bindingsStream = await engine.queryBindings(query);  // TBD: try-catch
   const bindingsArray = await streamToArray(bindingsStream);
+
   return bindingsArray.map((bindings) => bindings.get('proof'));
 };
 
-const deduplicateQuads = (quads: RDF.Quad[]) =>
-  quads.filter((quad1, index, self) =>
-    index === self.findIndex((quad2) => (quad1.equals(quad2))));
-
 // utility function from [string, T][] to Map<string, T[]>
-export const entriesToMap = <T>(entries: [string, T][]) => {
+export const entriesToMap = <T>(entries: Array<[string, T]>): Map<string, T[]> => {
   const res = new Map<string, T[]>();
   for (const entry of entries) {
     if (res.has(entry[0])) {
@@ -170,14 +177,15 @@ export const entriesToMap = <T>(entries: [string, T][]) => {
       res.set(entry[0], [entry[1]]);
     };
   };
+
   return res;
 };
 
 // ref: https://github.com/belayeng/quadstore-comunica/blob/master/spec/src/utils.ts
-export const streamToArray = <T>(source: RDF.ResultStream<T>): Promise<T[]> => {
-  return new Promise((resolve, reject) => {
+export const streamToArray = async <T>(source: RDF.ResultStream<T>): Promise<T[]> => {
+  return await new Promise((resolve, reject) => {
     const items: T[] = [];
-    source.on('data', (item) => {
+    source.on('data', (item: T) => {
       items.push(item);
     });
     source.on('end', () => {
@@ -191,11 +199,11 @@ export const streamToArray = <T>(source: RDF.ResultStream<T>): Promise<T[]> => {
 
 export const genJsonResults =
   (jsonVars: string[], bindingsArray: RDF.Bindings[]): JsonResults => {
-    const isNotNullOrUndefined = <T>(v?: T | null): v is T => null != v;
+    const isNotNullOrUndefined = <T>(v?: T | null): v is T => v != null;
 
     const jsonBindingsArray = [];
     for (const bindings of bindingsArray) {
-      const jsonBindingsEntries: [string, JsonBindingsType][] = [...bindings].map(([k, v]) => {
+      const jsonBindingsEntries: Array<[string, JsonBindingsType]> = [...bindings].map(([k, v]) => {
         let value: JsonBindingsType;
         if (v.termType === 'Literal') {
           if (v.language !== '') {
@@ -229,11 +237,13 @@ export const genJsonResults =
         } else {
           return undefined;
         };
+
         return [k.value, value];
-      }).filter(isNotNullOrUndefined) as [string, JsonBindingsType][];
+      }).filter(isNotNullOrUndefined) as Array<[string, JsonBindingsType]>;
       const jsonBindings = Object.fromEntries(jsonBindingsEntries);
       jsonBindingsArray.push(jsonBindings);
     }
+
     return {
       "head": { "vars": jsonVars },
       "results": {
@@ -245,61 +255,49 @@ export const genJsonResults =
 export const isWildcard = (vars: sparqljs.Variable[] | [sparqljs.Wildcard]): vars is [sparqljs.Wildcard] =>
   vars.length === 1 && 'value' in vars[0] && vars[0].value === '*';
 
-export const addBnodePrefix = (quad: RDF.Quad | RDF.Quad[]) => {
-  const _addBnodePrefix = (quad: RDF.Quad) => {
-    if (quad.subject.termType === 'BlankNode'
-      && !quad.subject.value.startsWith(BNODE_PREFIX)) {
-      quad.subject.value = `${BNODE_PREFIX}${quad.subject.value}`;
-    }
-    if (quad.object.termType === 'BlankNode'
-      && !quad.object.value.startsWith(BNODE_PREFIX)) {
-      quad.object.value = `${BNODE_PREFIX}${quad.object.value}`;
-    }
-    if (quad.graph.termType === 'BlankNode'
-      && !quad.graph.value.startsWith(BNODE_PREFIX)) {
-      quad.graph.value = `${BNODE_PREFIX}${quad.graph.value}`;
-    }
-    return quad;
-  }
+export const addBnodePrefix =
+  (quad: RDF.Quad | RDF.Quad[]): RDF.Quad | RDF.Quad[] => {
+    const _addBnodePrefix = (quad: RDF.Quad): RDF.Quad => {
+      if (quad.subject.termType === 'BlankNode'
+        && !quad.subject.value.startsWith(BNODE_PREFIX)) {
+        quad.subject.value = `${BNODE_PREFIX}${quad.subject.value}`;
+      }
+      if (quad.object.termType === 'BlankNode'
+        && !quad.object.value.startsWith(BNODE_PREFIX)) {
+        quad.object.value = `${BNODE_PREFIX}${quad.object.value}`;
+      }
+      if (quad.graph.termType === 'BlankNode'
+        && !quad.graph.value.startsWith(BNODE_PREFIX)) {
+        quad.graph.value = `${BNODE_PREFIX}${quad.graph.value}`;
+      }
 
-  return Array.isArray(quad) ? quad.map((q) => _addBnodePrefix(q)) : _addBnodePrefix(quad);
-}
+      return quad;
+    }
+
+    return Array.isArray(quad) ? quad.map((q) => _addBnodePrefix(q)) : _addBnodePrefix(quad);
+  }
 
 // ** functions for standard SPARQL endpoint (for debug) **
 
-const respondToSelectQuery = async (query: string, parsedQuery: RDF.QueryBindings<RDF.AllMetadataSupport>) => {
-  const bindingsStream = await parsedQuery.execute();
-  const bindingsArray = await streamToArray(bindingsStream);
+const respondToSelectQuery =
+  async (query: string, parsedQuery: RDF.QueryBindings<RDF.AllMetadataSupport>): Promise<{ jsonVars: string[]; bindingsArray: RDF.Bindings[]; }> => {
+    const bindingsStream = await parsedQuery.execute();
+    const bindingsArray = await streamToArray(bindingsStream);
+    const jsonVars = bindingsArray.length >= 1 ? [...bindingsArray[0].keys()].map((k) => k.value) : [''];
 
-  // // extract variables from SELECT query
-  // const varsAndParsedQuery = parseQuery(query);
-  // if ('error' in varsAndParsedQuery) {
-  //   throw new Error(varsAndParsedQuery.error);
-  // }
-  // const vars = varsAndParsedQuery.vars;
+    return { jsonVars, bindingsArray };
+  };
 
-  // // send response
-  // let jsonVars: string[];
-  // if (vars.length === 1 && 'value' in vars[0] && vars[0].value === '*') {
-  //   // SELECT * WHERE {...}
-  //   jsonVars = bindingsArray.length >= 1 ? [...bindingsArray[0].keys()].map((k) => k.value) : [''];
-  // } else {
-  //   // SELECT ?s ?p ?o WHERE {...}
-  //   jsonVars = vars.map((v) => v.value);
-  // }
+const respondToConstructQuery =
+  async (parsedQuery: RDF.QueryQuads<RDF.AllMetadataSupport>): Promise<jsonld.NodeObject> => {
+    const quadsStream = await parsedQuery.execute();
+    const quadsArray = await streamToArray(quadsStream);
+    const quadsArrayWithBnodePrefix = addBnodePrefix(quadsArray);
+    const quadsJsonld = await jsonld.fromRDF(quadsArrayWithBnodePrefix);
+    const quadsJsonldCompact = await jsonld.compact(quadsJsonld, CONTEXTS, { documentLoader });
 
-  let jsonVars = bindingsArray.length >= 1 ? [...bindingsArray[0].keys()].map((k) => k.value) : [''];
-  return { jsonVars, bindingsArray };
-};
-
-const respondToConstructQuery = async (parsedQuery: RDF.QueryQuads<RDF.AllMetadataSupport>) => {
-  const quadsStream = await parsedQuery.execute();
-  const quadsArray = await streamToArray(quadsStream);
-  const quadsArrayWithBnodePrefix = addBnodePrefix(quadsArray);
-  const quadsJsonld = await jsonld.fromRDF(quadsArrayWithBnodePrefix);
-  const quadsJsonldCompact = await jsonld.compact(quadsJsonld, CONTEXTS, { documentLoader });
-  return quadsJsonldCompact;
-};
+    return quadsJsonldCompact;
+  };
 
 export const processSparqlQuery = async (
   query: string,
@@ -316,11 +314,13 @@ export const processSparqlQuery = async (
   // execute query
   if (parsedQuery.resultType === 'bindings') {
     const { jsonVars, bindingsArray } = await respondToSelectQuery(query, parsedQuery)
+
     return genJsonResults(jsonVars, bindingsArray);
   } else if (parsedQuery.resultType === 'quads') {
     return await respondToConstructQuery(parsedQuery);
   } else if (parsedQuery.resultType === 'boolean') {
     const askResult = await parsedQuery.execute();
+
     return { head: {}, boolean: askResult };
   } else {
     return "invalid SPARQL query";

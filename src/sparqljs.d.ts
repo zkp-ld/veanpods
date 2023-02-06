@@ -7,38 +7,34 @@ declare module "sparqljs" {
   // Definitions: https://github.com/DefinitelyTyped/DefinitelyTyped
   // TypeScript Version: 2.1
 
-  import * as RdfJs from 'rdf-js';
+  import type * as RdfJs from 'rdf-js';
 
-  export const Parser: {
-    new(options?: ParserOptions): SparqlParser;
-  };
+  export const Parser: new (options?: ParserOptions) => SparqlParser;
 
   export interface ParserOptions {
-    prefixes?: { [prefix: string]: string } | undefined;
+    prefixes?: Record<string, string> | undefined;
     baseIRI?: string | undefined;
     factory?: RdfJs.DataFactory | undefined;
     sparqlStar?: boolean | undefined;
   }
 
-  export const Generator: {
-    new(options?: GeneratorOptions): SparqlGenerator;
-  };
+  export const Generator: new (options?: GeneratorOptions) => SparqlGenerator;
 
   export interface GeneratorOptions {
     allPrefixes?: boolean | undefined;
-    prefixes?: { [prefix: string]: string } | undefined;
+    prefixes?: Record<string, string> | undefined;
     indent?: string | undefined;
     newline?: string | undefined;
     sparqlStar?: boolean | undefined;
   }
 
   export interface SparqlParser {
-    parse(query: string): SparqlQuery;
+    parse: (query: string) => SparqlQuery;
   }
 
   export interface SparqlGenerator {
-    stringify(query: SparqlQuery): string;
-    createGenerator(): any;
+    stringify: (query: SparqlQuery) => string;
+    createGenerator: () => unknown;
   }
 
   export class Wildcard {
@@ -62,7 +58,7 @@ declare module "sparqljs" {
   export interface BaseQuery {
     type: 'query';
     base?: string | undefined;
-    prefixes: { [prefix: string]: string; };
+    prefixes: Record<string, string>;
     where?: Pattern[] | undefined;
     values?: ValuePatternRow[] | undefined;
   }
@@ -108,7 +104,7 @@ declare module "sparqljs" {
 
   export interface Update {
     type: 'update';
-    prefixes: { [prefix: string]: string; };
+    prefixes: Record<string, string>;
     updates: UpdateOperation[];
   }
 
@@ -257,9 +253,7 @@ declare module "sparqljs" {
     values: ValuePatternRow[];
   }
 
-  export interface ValuePatternRow {
-    [variable: string]: IriTerm | LiteralTerm | undefined;
-  }
+  export type ValuePatternRow = Record<string, IriTerm | LiteralTerm | undefined>;
 
   export interface Triple {
     subject: IriTerm | BlankTerm | VariableTerm | QuadTerm;
