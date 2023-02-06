@@ -416,10 +416,10 @@
     bs58 "4.0.1"
     rfc4648 "1.5.0"
 
-"@zkp-ld/rdf-signatures-bbs@0.0.5-unstable.f0c539b":
-  version "0.0.5-unstable.f0c539b"
-  resolved "https://registry.yarnpkg.com/@zkp-ld/rdf-signatures-bbs/-/rdf-signatures-bbs-0.0.5-unstable.f0c539b.tgz#9c362593facbefdc7e60c3bbcbe0f79400dede8b"
-  integrity sha512-OceAqVl3eri71ihnHw9P0dyV4yCiVZICcQh4liLwkkFxDz170PKmOnfB3ICXefj0MQZoFxtb8uSSM5SwEc1ILw==
+"@zkp-ld/rdf-signatures-bbs@0.0.7":
+  version "0.0.7"
+  resolved "https://registry.yarnpkg.com/@zkp-ld/rdf-signatures-bbs/-/rdf-signatures-bbs-0.0.7.tgz#8307836b78d6a49a00b6fac1347404f568bfcd46"
+  integrity sha512-hTxny4VA3sP7m0VOd8noeD6Zdj56oaffx4mlj+tL7O3FzW/CnY4lUKaw/CtFGiGjBoqJwAuhMQ1ZCphf8yFKsA==
   dependencies:
     "@rdfjs/types" "^1.1.0"
     "@stablelib/random" "1.0.1"

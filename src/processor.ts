@@ -68,25 +68,28 @@ export const processQuery = async (
     const suite = new BbsTermwiseSignatureProof2021({
       useNativeCanonize: false,
     });
-    const derivedProofs: any = await suite.deriveProofMultiRDF({
+    const derivedProofs = await suite.deriveProofMultiRDF({
       inputDocuments,
       documentLoader,
     });
 
     // serialize derived VCs as JSON-LD documents
-    const derivedVcs: any[] = [];
-    for (const { document, proof: proofs } of derivedProofs) {
+    const derivedVcs = [];
+    for (const { document, proofs } of derivedProofs) {
       // connect document and proofs
-      const documentId = document.find(
-        (quad: RDF.Quad) => quad.predicate.value === RDF_TYPE && quad.object.value === VC_TYPE)
-        .subject;
-      const proofGraphs = [];
+      const vc = document.find(
+        (quad) => quad.predicate.value === RDF_TYPE && quad.object.value === VC_TYPE);
+      if (vc === undefined) {
+        return { "error": "a stored VC does not have Identifier" };
+      }
+      const credentialId = vc.subject;
+      const proofGraphs: RDF.Quad[][] = [];
       for (const proof of proofs) {
         const proofGraphId = df.blankNode();
-        const proofGraph = proof.map((quad: RDF.Quad) =>
+        const proofGraph = proof.map((quad) =>
           df.quad(quad.subject, quad.predicate, quad.object, proofGraphId));
         proofGraphs.push(proofGraph);
-        document.push(df.quad(documentId, df.namedNode(PROOF), proofGraphId));
+        document.push(df.quad(credentialId, df.namedNode(PROOF), proofGraphId));
       }
       const cred = document.concat(proofGraphs.flat());
       // add bnode prefix `_:` to blank node ids
@@ -95,7 +98,7 @@ export const processQuery = async (
       // to compact JSON-LD
       const credJsonCompact = await jsonld.compact(credJson, CONTEXTS, { documentLoader });
       // shape it to be a VC
-      const derivedVc: any = await jsonld.frame(
+      const derivedVc = await jsonld.frame(
         credJsonCompact,
         VC_FRAME,
         { documentLoader }
