@@ -1,8 +1,9 @@
 {
   "name": "@zkp-ld/veanpods",
-  "version": "0.0.1",
+  "version": "0.0.2",
   "author": "yamdan",
-  "main": "main.js",
+  "main": "./main.js",
+  "exports": "./main.js",
   "type": "module",
   "dependencies": {
     "@types/express": "^4.17.14",
