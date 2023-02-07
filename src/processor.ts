@@ -38,6 +38,15 @@ const VP_TEMPLATE: VP =
   verifiableCredential: [],
 };
 
+/**
+ * Parse zk-SPARQL query and return JSON results with verifiable presentations
+ * 
+ * @param query - zk-SPARQL query
+ * @param store - quadstore where verifiable credentials are stored
+ * @param df - RDF/JS DataFactory
+ * @param engine - SPARQL engine attached to the quadstore
+ * @returns - JSON results or error object
+ */
 export const processQuery = async (
   query: string,
   store: Quadstore,
@@ -219,35 +228,54 @@ const executeInternalQueries = async (
   };
 }
 
-// get `graphIriToBgpTriple` from extended solution and gVarToBgpTriple
-//
-// example parameters:
-//   extendedSolution (partially) = 
-//     { "ggggg0": "http://example.org/graph0",
-//       "ggggg1": "http://example.org/graph1",
-//       "ggggg2": "http://example.org/graph0" }
-//   gVarToBgpTriple =
-//     { "ggggg0": (:s0 :p0 :o0),
-//       "ggggg1": (:s1 :p1 :o1),
-//       "ggggg2": (:s2 :p2 :o2) }
+
+/**
+ * Return `graphIriToBgpTriple` from extended solution and graphVarToBgpTriple
+ * 
+ * @param extendedSolution - extended SPARQL solution
+ * @param graphVarAndBgpTriple - pairs of a graph variable and its corresponding BGP triple
+ * @returns - a map from graph IRI to BGP triple with input extended solution
+ * 
+ * @remarks
+ * ## Examples
+ * 
+ * extendedSolution (graph part only):
+ * ```json 
+ * { "ggggg0": "http://example.org/g0",
+ *   "ggggg1": "http://example.org/g1",
+ *   "ggggg2": "http://example.org/g0" }
+ * ```
+ * 
+ * graphVarAndBgpTriple:
+ * ```json
+ * [ [ "ggggg0", (:s0 :p0 :o0) ],
+ *   [ "ggggg1", (:s1 :p1 :o1) ],
+ *   [ "ggggg2", (:s2 :p2 :o2) ] ]
+ * ```
+ * 
+ * graphIriAndBgpTriples:
+ * ```json
+ * [ [ "http://example.org/g0", (:s0 :p0 :o0) ],
+ *   [ "http://example.org/g1", (:s1 :p1 :o1) ],
+ *   [ "http://example.org/g0", (:s2 :p2 :o2) ] ]
+ * ```
+ * 
+ * graphIriToBgpTriple:
+ * ```json
+ * { "http://example.org/g0": [ (:s0 :p0 :o0), (:s2 :p2 :o2) ],
+ *   "http://example.org/g1": [ (:s1 :p1 :o1 ) ] }
+ * ```
+ */
 const identifyCreds = (
   extendedSolution: RDF.Bindings,
-  gVarAndBgpTriple: Array<[string, ZkTripleBgp]>,
+  graphVarAndBgpTriple: Array<[string, ZkTripleBgp]>,
 ): IdentifyCredsResultType => {
-  // graphIriAndBgpTriples =
-  //   [ [ "http://example.org/graph0", (:s0 :p0 :o0) ],
-  //     [ "http://example.org/graph1", (:s1 :p1 :o1) ],
-  //     [ "http://example.org/graph0", (:s2 :p2 :o2) ] ]
   const graphIriAndBgpTriples: Array<[string, ZkTripleBgp]> = [];
-  for (const [gVar, bgpTriple] of gVarAndBgpTriple) {
-    const uri = extendedSolution.get(gVar);
+  for (const [graphVar, bgpTriple] of graphVarAndBgpTriple) {
+    const uri = extendedSolution.get(graphVar);
     if (uri === undefined || uri.termType !== "NamedNode") continue;
     graphIriAndBgpTriples.push([uri.value, bgpTriple]);
   };
-
-  // graphIriToBgpTriple =
-  //   { "http://example.org/graph0": [ (:s0 :p0 :o0), (:s2 :p2 :o2) ],
-  //     "http://example.org/graph1": [ (:s1 :p1 :o1 ) ] }
   const graphIriToBgpTriple = entriesToMap(graphIriAndBgpTriples);
 
   return ({ extendedSolution, graphIriToBgpTriple });

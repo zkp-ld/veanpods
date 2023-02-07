@@ -1,3 +1,9 @@
+/**
+ * veanpods: Verifiable and Anonymous Personal Data Store with zk-SPARQL
+ * 
+ * @packageDocumentation
+ */
+
 import type * as RDF from '@rdfjs/types';
 import express from 'express';
 import jsonld from 'jsonld';
