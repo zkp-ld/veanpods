@@ -45,7 +45,7 @@ export interface RevealedCreds {
   proofs: RDF.Quad[][];
 };
 
-export interface FetchResult {
+export interface InternalQueryResult {
   extendedSolutions: RDF.Bindings[];
   revealedCredsArray: Array<Map<string, RevealedCreds>>;
   requiredVars: sparqljs.VariableTerm[] | [sparqljs.Wildcard];

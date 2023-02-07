@@ -8,7 +8,7 @@ import { type DataFactory } from 'rdf-data-factory';
 import sparqljs from 'sparqljs';
 import { anonymizeQuad, Anonymizer } from './anonymizer.js';
 import { customLoader } from "./data/index.js";
-import { type FetchResult, type IdentifyCredsResultType, type JsonResults, type ParsedQuery, type RevealedCreds, type VP, type ZkTripleBgp } from './types';
+import { type InternalQueryResult, type IdentifyCredsResultType, type JsonResults, type ParsedQuery, type RevealedCreds, type VP, type ZkTripleBgp } from './types';
 import { addBnodePrefix, entriesToMap, genJsonResults, getBgpTriples, getCredentialMetadata, getProofsId, isWildcard, isZkObject, isZkPredicate, isZkSubject, parseQuery, streamToArray } from './utils.js';
 
 // built-in JSON-LD contexts and sample VCs
@@ -160,7 +160,7 @@ const executeInternalQueries = async (
   store: Quadstore,
   df: DataFactory<RDF.Quad>,
   engine: Engine,
-): Promise<FetchResult | { error: string }> => {
+): Promise<InternalQueryResult | { error: string }> => {
   // parse zk-SPARQL query
   const varsAndParsedQuery = parseQuery(query);
   if ('error' in varsAndParsedQuery) {
