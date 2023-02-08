@@ -29,7 +29,8 @@
     "lint:fix": "eslint --fix 'src/**/*.{js,jsx,ts,tsx}'",
     "format": "prettier --write --loglevel=warn 'src/**/*.{js,jsx,ts,tsx,html,json,gql,graphql}'",
     "fix": "npm run --silent format; npm run --silent lint:fix",
-    "preinstall": "npx typesync || :"
+    "preinstall": "npx typesync || :",
+    "test": "vitest"
   },
   "devDependencies": {
     "@types/eslint": "^8.21.0",
@@ -43,6 +44,7 @@
     "eslint-plugin-promise": "^6.0.0",
     "eslint-plugin-tsdoc": "^0.2.17",
     "prettier": "^2.8.3",
-    "typescript": "*"
+    "typescript": "*",
+    "vitest": "^0.28.4"
   }
 }

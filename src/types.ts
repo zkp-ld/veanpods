@@ -2,7 +2,7 @@ import type * as RDF from '@rdfjs/types';
 import type jsonld from 'jsonld';
 import type sparqljs from 'sparqljs';
 
-export interface VP {
+export interface VerifiablePresentation {
   '@context': unknown;
   type: 'VerifiablePresentation';
   verifiableCredential: jsonld.NodeObject[];

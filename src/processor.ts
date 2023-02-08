@@ -7,9 +7,30 @@ import { type Engine } from 'quadstore-comunica';
 import { type DataFactory } from 'rdf-data-factory';
 import sparqljs from 'sparqljs';
 import { anonymizeQuad, Anonymizer } from './anonymizer.js';
-import { customLoader } from "./data/index.js";
-import { type InternalQueryResult, type IdentifyCredsResultType, type JsonResults, type ParsedQuery, type RevealedCreds, type VP, type ZkTripleBgp } from './types';
-import { addBnodePrefix, entriesToMap, genJsonResults, getBgpTriples, getCredentialMetadata, getProofsId, isWildcard, isZkObject, isZkPredicate, isZkSubject, parseQuery, streamToArray } from './utils.js';
+import { customLoader } from './data/index.js';
+import {
+  type InternalQueryResult,
+  type IdentifyCredsResultType,
+  type JsonResults,
+  type ParsedQuery,
+  type RevealedCreds,
+  type VerifiablePresentation,
+  type ZkTripleBgp,
+} from './types';
+import {
+  addBnodePrefix,
+  entriesToMap,
+  genJsonResults,
+  getBgpTriples,
+  getCredentialMetadata,
+  getProofsId,
+  isWildcard,
+  isZkObject,
+  isZkPredicate,
+  isZkSubject,
+  parseQuery,
+  streamToArray,
+} from './utils.js';
 
 // built-in JSON-LD contexts and sample VCs
 const documentLoader = customLoader;
@@ -31,8 +52,7 @@ const VC_FRAME =
   type: 'VerifiableCredential',
   proof: {}  // explicitly required otherwise `sec:proof` is used instead
 };
-const VP_TEMPLATE: VP =
-{
+const VP_TEMPLATE: VerifiablePresentation = {
   '@context': CONTEXTS,
   type: 'VerifiablePresentation',
   verifiableCredential: [],
@@ -66,7 +86,7 @@ export const processQuery = async (
   } = queryResult;
 
   // 2. generate VPs
-  const vps: VP[] = [];
+  const vps: VerifiablePresentation[] = [];
   for (const creds of revealedCredsArray) {
     // run BBS+
     const inputDocuments = Array.from(creds,
