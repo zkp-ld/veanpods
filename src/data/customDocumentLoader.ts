@@ -80,6 +80,7 @@ const customDocLoader = (url: string): RemoteDocument => {
   );
 };
 
-// eslint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call
+// eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
 export const customLoader: (url: string) => Promise<RemoteDocument> =
+  // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call
   jsonldSignatures.extendContextLoader(customDocLoader);

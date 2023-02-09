@@ -163,10 +163,10 @@ export const processQuery = async (
   const revealedSolutions = isWildcard(requiredVars)
     ? extendedSolutions
     : extendedSolutions.map((extendedSolution) =>
-        extendedSolution.filter((_, key) =>
-          requiredVarNames.includes(key.value)
-        )
-      );
+      extendedSolution.filter((_, key) =>
+        requiredVarNames.includes(key.value)
+      )
+    );
 
   // 4. add VPs (or VCs) to each corresponding solutions
   const revealedSolutionWithVPs = revealedSolutions.map((revealedSolution, i) =>
