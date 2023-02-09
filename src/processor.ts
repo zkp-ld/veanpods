@@ -146,16 +146,6 @@ export const processQuery = async (
     const vp = { ...VP_TEMPLATE };
     vp.verifiableCredential = derivedVcs;
     vps.push(vp);
-
-    // // debug: verify derived VC
-    // // separate document and proofs
-    // const verified = await verifyProofMulti(derivedVcs,
-    //   {
-    //     suite,
-    //     documentLoader,
-    //     purpose: new jsigs.purposes.AssertionProofPurpose()
-    //   });
-    // console.log(`verified: ${JSON.stringify(verified, null, 2)}`);
   }
 
   // 3. remove unrevealed bindings from extended solutions
