@@ -16,6 +16,7 @@ import {
   type RevealedCreds,
   type VerifiablePresentation,
   type ZkTripleBgp,
+  type ZkTerm,
 } from './types';
 import {
   addBnodePrefix,
@@ -83,80 +84,21 @@ export const processQuery = async (
   const { extendedSolutions, revealedCredsArray, requiredVars, anonToTerm } =
     queryResult;
 
-  // 2. generate VPs
-  const vps: VerifiablePresentation[] = [];
-  for (const creds of revealedCredsArray) {
-    // run BBS+
-    const inputDocuments = Array.from(
-      creds,
-      ([_, { wholeDoc, anonymizedDoc, proofs }]) => ({
-        document: wholeDoc.filter((quad) => quad.predicate.value !== PROOF), // document without `proof` predicate
-        proofs,
-        revealedDocument: anonymizedDoc.filter(
-          (quad) => quad.predicate.value !== PROOF
-        ), // document without `proof` predicate
-        anonToTerm,
-      })
-    );
-    const suite = new BbsTermwiseSignatureProof2021({
-      useNativeCanonize: false,
-    });
-    const derivedProofs = await suite.deriveProofMultiRDF({
-      inputDocuments,
-      documentLoader,
-    });
-
-    // serialize derived VCs as JSON-LD documents
-    const derivedVcs = [];
-    for (const { document, proofs } of derivedProofs) {
-      // connect document and proofs
-      const vc = document.find(
-        (quad) =>
-          quad.predicate.value === RDF_TYPE && quad.object.value === VC_TYPE
-      );
-      if (vc === undefined) {
-        return { error: 'a stored VC does not have Identifier' };
-      }
-      const credentialId = vc.subject;
-      const proofGraphs: RDF.Quad[][] = [];
-      for (const proof of proofs) {
-        const proofGraphId = df.blankNode();
-        const proofGraph = proof.map((quad) =>
-          df.quad(quad.subject, quad.predicate, quad.object, proofGraphId)
-        );
-        proofGraphs.push(proofGraph);
-        document.push(df.quad(credentialId, df.namedNode(PROOF), proofGraphId));
-      }
-      const cred = document.concat(proofGraphs.flat());
-      // add bnode prefix `_:` to blank node ids
-      const credWithBnodePrefix = addBnodePrefix(cred);
-      const credJson = await jsonld.fromRDF(credWithBnodePrefix);
-      // to compact JSON-LD
-      const credJsonCompact = await jsonld.compact(credJson, CONTEXTS, {
-        documentLoader,
-      });
-      // shape it to be a VC
-      const derivedVc = await jsonld.frame(credJsonCompact, VC_FRAME, {
-        documentLoader,
-      });
-      derivedVcs.push(derivedVc);
-    }
-
-    // serialize VP
-    const vp = { ...VP_TEMPLATE };
-    vp.verifiableCredential = derivedVcs;
-    vps.push(vp);
-  }
-
-  // 3. remove unrevealed bindings from extended solutions
+  // 2. remove unrevealed bindings from extended solutions
   const requiredVarNames = requiredVars.map((v) => v.value);
   const revealedSolutions = isWildcard(requiredVars)
     ? extendedSolutions
     : extendedSolutions.map((extendedSolution) =>
-      extendedSolution.filter((_, key) =>
-        requiredVarNames.includes(key.value)
-      )
-    );
+        extendedSolution.filter((_, key) =>
+          requiredVarNames.includes(key.value)
+        )
+      );
+
+  // 3. generate VPs
+  const vps = await generateVP(revealedCredsArray, anonToTerm, df);
+  if ('error' in vps) {
+    return vps;
+  }
 
   // 4. add VPs (or VCs) to each corresponding solutions
   const revealedSolutionWithVPs = revealedSolutions.map((revealedSolution, i) =>
@@ -461,4 +403,76 @@ const getExtendedSolutions = async (
   const extendedSolutions = await streamToArray(bindingsStream);
 
   return extendedSolutions;
+};
+
+const generateVP = async (
+  revealedCredsArray: Array<Map<string, RevealedCreds>>,
+  anonToTerm: Map<string, ZkTerm>,
+  df: DataFactory<RDF.Quad>
+): Promise<VerifiablePresentation[] | { error: string }> => {
+  const vps: VerifiablePresentation[] = [];
+  for (const creds of revealedCredsArray) {
+    // run BBS+
+    const inputDocuments = Array.from(
+      creds,
+      ([_, { wholeDoc, anonymizedDoc, proofs }]) => ({
+        document: wholeDoc.filter((quad) => quad.predicate.value !== PROOF), // document without `proof` predicate
+        proofs,
+        revealedDocument: anonymizedDoc.filter(
+          (quad) => quad.predicate.value !== PROOF
+        ), // document without `proof` predicate
+        anonToTerm,
+      })
+    );
+    const suite = new BbsTermwiseSignatureProof2021({
+      useNativeCanonize: false,
+    });
+    const derivedProofs = await suite.deriveProofMultiRDF({
+      inputDocuments,
+      documentLoader,
+    });
+
+    // serialize derived VCs as JSON-LD documents
+    const derivedVcs = [];
+    for (const { document, proofs } of derivedProofs) {
+      // connect document and proofs
+      const vc = document.find(
+        (quad) =>
+          quad.predicate.value === RDF_TYPE && quad.object.value === VC_TYPE
+      );
+      if (vc === undefined) {
+        return { error: 'a stored VC does not have Identifier' };
+      }
+      const credentialId = vc.subject;
+      const proofGraphs: RDF.Quad[][] = [];
+      for (const proof of proofs) {
+        const proofGraphId = df.blankNode();
+        const proofGraph = proof.map((quad) =>
+          df.quad(quad.subject, quad.predicate, quad.object, proofGraphId)
+        );
+        proofGraphs.push(proofGraph);
+        document.push(df.quad(credentialId, df.namedNode(PROOF), proofGraphId));
+      }
+      const cred = document.concat(proofGraphs.flat());
+      // add bnode prefix `_:` to blank node ids
+      const credWithBnodePrefix = addBnodePrefix(cred);
+      const credJson = await jsonld.fromRDF(credWithBnodePrefix);
+      // to compact JSON-LD
+      const credJsonCompact = await jsonld.compact(credJson, CONTEXTS, {
+        documentLoader,
+      });
+      // shape it to be a VC
+      const derivedVc = await jsonld.frame(credJsonCompact, VC_FRAME, {
+        documentLoader,
+      });
+      derivedVcs.push(derivedVc);
+    }
+
+    // serialize VP
+    const vp = { ...VP_TEMPLATE };
+    vp.verifiableCredential = derivedVcs;
+    vps.push(vp);
+  }
+
+  return vps;
 };
