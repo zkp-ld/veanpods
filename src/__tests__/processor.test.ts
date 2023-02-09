@@ -2,6 +2,7 @@ import type * as RDF from '@rdfjs/types';
 import {
   BbsTermwiseSignatureProof2021,
   verifyProofMulti,
+  type VerifyProofMultiResult,
 } from '@zkp-ld/rdf-signatures-bbs';
 import jsonld from 'jsonld';
 import jsigs from 'jsonld-signatures';
@@ -118,8 +119,30 @@ const scope = await store.initScope(); // for preventing blank node collisions
 const quads = (await jsonld.toRDF(testVcs, { documentLoader })) as RDF.Quad[];
 await store.multiPut(quads, { scope });
 
+// BBS+ suite
+const suite = new BbsTermwiseSignatureProof2021({
+  useNativeCanonize: false,
+});
+
+// utility function
+const verifyVP = async (
+  vp: VerifiablePresentation
+): Promise<VerifyProofMultiResult> => {
+  // verify derived VCs in VP
+  const derivedVcs = vp.verifiableCredential;
+  // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
+  const verified = await verifyProofMulti(derivedVcs, {
+    suite,
+    documentLoader,
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-member-access
+    purpose: new jsigs.purposes.AssertionProofPurpose(),
+  });
+
+  return verified as VerifyProofMultiResult;
+};
+
 describe('processQuery', () => {
-  it('should return query results and VPs to the simple query', async () => {
+  it('should return query results and VPs to the simple SELECT query', async () => {
     const query = `
       PREFIX xsd: <http://www.w3.org/2001/XMLSchema#>
       PREFIX rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#>
@@ -136,10 +159,6 @@ describe('processQuery', () => {
         FILTER ( ?date > "2022-03-31"^^xsd:dateTime )
       }
     `;
-
-    const suite = new BbsTermwiseSignatureProof2021({
-      useNativeCanonize: false,
-    });
 
     // run zk-SPARQL query
     const result = await processQuery(query, store, df, engine);
@@ -162,17 +181,46 @@ describe('processQuery', () => {
       expect(date.datatype).toBe('http://www.w3.org/2001/XMLSchema#dateTime');
       expect(date.value).toEqual('2022-04-04T00:00:00Z');
 
-      // verify derived VCs in `vp`
+      // verify VP
       const vp = JSON.parse(bindings.vp.value) as VerifiablePresentation;
-      const derivedVcs = vp.verifiableCredential;
-      // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
-      const verified = await verifyProofMulti(derivedVcs, {
-        suite,
-        documentLoader,
-        // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-member-access
-        purpose: new jsigs.purposes.AssertionProofPurpose(),
-      });
-      // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
+      const verified = await verifyVP(vp);
+      expect(verified.verified).toBeTruthy();
+    }
+  });
+
+  it('should return query results and VPs to the simple ASK query', async () => {
+    const query = `
+      PREFIX xsd: <http://www.w3.org/2001/XMLSchema#>
+      PREFIX rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#>
+      PREFIX rdfs: <http://www.w3.org/2000/01/rdf-schema#>
+      PREFIX s: <http://schema.org/>
+      PREFIX : <http://example.org/vocab/>
+
+      ASK WHERE {
+        ?s a s:Person .
+        ?s :isPatientOf ?ev .
+        ?ev :vaccinationDate ?date .
+        ?ev :vaccine ?vac .
+        ?vac s:status "active" .
+        FILTER ( ?date > "2022-03-31"^^xsd:dateTime )
+      }
+    `;
+
+    // run zk-SPARQL query
+    const result = await processQuery(query, store, df, engine);
+    if ('error' in result) {
+      throw new Error('processQuery returns error');
+    }
+
+    // check resulted variables
+    expect(result.head).toEqual({
+      vars: ['vp'],
+    });
+
+    for (const bindings of result.results.bindings) {
+      // verify VP
+      const vp = JSON.parse(bindings.vp.value) as VerifiablePresentation;
+      const verified = await verifyVP(vp);
       expect(verified.verified).toBeTruthy();
     }
   });
