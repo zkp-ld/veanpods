@@ -28,6 +28,55 @@ await store.open();
 // VCs for test
 const testVcs = [
   {
+    '@id': 'urn:graph:http://example.org/vaccinationCredential/01',
+    '@graph': {
+      '@context': [
+        'https://www.w3.org/2018/credentials/v1',
+        'https://zkp-ld.org/bbs-termwise-2021.jsonld',
+        'https://schema.org',
+        {
+          Vaccination: 'http://example.org/vocab/Vaccination',
+          isPatientOf: 'http://example.org/vocab/isPatientOf',
+          lotNumber: 'http://example.org/vocab/lotNumber',
+          vaccinationDate: {
+            '@id': 'http://example.org/vocab/vaccinationDate',
+            '@type': 'xsd:dateTime',
+          },
+          vaccine: {
+            '@id': 'http://example.org/vocab/vaccine',
+            '@type': '@id',
+          },
+        },
+      ],
+      id: 'http://example.org/vaccinationCredential/01',
+      type: 'VerifiableCredential',
+      issuer: 'did:example:issuer1',
+      issuanceDate: '2022-01-01T00:00:00Z',
+      expirationDate: '2025-01-01T00:00:00Z',
+      credentialSubject: {
+        id: 'did:example:xyz',
+        type: 'Person',
+        name: 'John Smith',
+        isPatientOf: {
+          type: 'Vaccination',
+          id: 'http://example.org/vaccination/01',
+          vaccinationDate: '2022-01-01T00:00:00Z',
+          lotNumber: '0000001',
+          vaccine: 'http://example.org/vaccine/987',
+        },
+      },
+      proof: {
+        '@context': 'https://zkp-ld.org/bbs-termwise-2021.jsonld',
+        type: 'BbsTermwiseSignature2021',
+        created: '2023-02-09T09:35:07Z',
+        verificationMethod: 'did:example:issuer1#bbs-bls-key1',
+        proofPurpose: 'assertionMethod',
+        proofValue:
+          'mA9oePddXRZK1dTCt9iJOAPd9WabAW0rThUIP6RoLbUdPG1L5pPnRUG9BBpnFuzAZk9X1b6jApMKYEdL4Dn7/FYWZeJckHxW9vz+UVH1S7IfQDGkcW3zuR3eEVPpOot/KY1akOy29JVcl2rkkS5UVw==',
+      },
+    },
+  },
+  {
     '@id': 'urn:graph:http://example.org/vaccinationCredential/04',
     '@graph': {
       '@context': [
@@ -142,7 +191,58 @@ const verifyVP = async (
 };
 
 describe('processQuery', () => {
-  it('should return query results and VPs to the simple SELECT query', async () => {
+  it('should return query results and VPs to the simple SELECT query without FILTER', async () => {
+    const query = `
+      PREFIX xsd: <http://www.w3.org/2001/XMLSchema#>
+      PREFIX rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#>
+      PREFIX rdfs: <http://www.w3.org/2000/01/rdf-schema#>
+      PREFIX s: <http://schema.org/>
+      PREFIX : <http://example.org/vocab/>
+
+      SELECT ?date WHERE {
+        ?s a s:Person .
+        ?s :isPatientOf ?ev .
+        ?ev :vaccinationDate ?date .
+        ?ev :vaccine ?vac .
+        ?vac s:status "active" .
+      }
+    `;
+
+    // run zk-SPARQL query
+    const result = await processQuery(query, store, df, engine);
+    if ('error' in result) {
+      throw new Error('processQuery returns error');
+    }
+
+    // check resulted variables
+    expect(result.head).toEqual({
+      vars: ['date', 'vp'],
+    });
+
+    expect(result.results.bindings).toHaveLength(4);
+
+    for (const bindings of result.results.bindings) {
+      // validate `date`
+      const date = bindings.date;
+      expect(date.type).toBe('literal');
+      if (date.type !== 'literal') {
+        throw new Error('date should be literal');
+      }
+      expect(date.datatype).toBe('http://www.w3.org/2001/XMLSchema#dateTime');
+      expect(['2022-01-01T00:00:00Z', '2022-04-04T00:00:00Z']).toContain(
+        date.value
+      );
+
+      // verify VP
+      const vp = JSON.parse(bindings.vp.value) as VerifiablePresentation;
+      const verified = await verifyVP(vp);
+      expect(verified.verified).toBeTruthy();
+
+      // TODO: check if VP is valid for query result
+    }
+  });
+
+  it('should return query results and VPs to the simple SELECT query with FILTER', async () => {
     const query = `
       PREFIX xsd: <http://www.w3.org/2001/XMLSchema#>
       PREFIX rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#>
@@ -171,6 +271,8 @@ describe('processQuery', () => {
       vars: ['date', 'vp'],
     });
 
+    expect(result.results.bindings).toHaveLength(2);
+
     for (const bindings of result.results.bindings) {
       // validate `date`
       const date = bindings.date;
@@ -185,10 +287,87 @@ describe('processQuery', () => {
       const vp = JSON.parse(bindings.vp.value) as VerifiablePresentation;
       const verified = await verifyVP(vp);
       expect(verified.verified).toBeTruthy();
+
+      // debug
+      console.log(JSON.stringify(vp, null, 2));
+
+      // TODO: check if VP is valid for query result
     }
   });
 
-  it('should return query results and VPs to the simple ASK query', async () => {
+  it('should return no results to the simple SELECT query with out-of-range FILTER', async () => {
+    const query = `
+      PREFIX xsd: <http://www.w3.org/2001/XMLSchema#>
+      PREFIX rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#>
+      PREFIX rdfs: <http://www.w3.org/2000/01/rdf-schema#>
+      PREFIX s: <http://schema.org/>
+      PREFIX : <http://example.org/vocab/>
+
+      SELECT ?date WHERE {
+        ?s a s:Person .
+        ?s :isPatientOf ?ev .
+        ?ev :vaccinationDate ?date .
+        ?ev :vaccine ?vac .
+        ?vac s:status "active" .
+        FILTER ( ?date > "9999-12-31"^^xsd:dateTime ) # out-of-range
+      }
+    `;
+
+    // run zk-SPARQL query
+    const result = await processQuery(query, store, df, engine);
+    if ('error' in result) {
+      throw new Error('processQuery returns error');
+    }
+
+    // check resulted variables
+    expect(result.head).toEqual({
+      vars: ['date', 'vp'],
+    });
+
+    expect(result.results.bindings).toHaveLength(0);
+  });
+
+  it('should return query results and VPs to the simple ASK query without FILTER', async () => {
+    const query = `
+      PREFIX xsd: <http://www.w3.org/2001/XMLSchema#>
+      PREFIX rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#>
+      PREFIX rdfs: <http://www.w3.org/2000/01/rdf-schema#>
+      PREFIX s: <http://schema.org/>
+      PREFIX : <http://example.org/vocab/>
+
+      ASK WHERE {
+        ?s a s:Person .
+        ?s :isPatientOf ?ev .
+        ?ev :vaccinationDate ?date .
+        ?ev :vaccine ?vac .
+        ?vac s:status "active" .
+      }
+    `;
+
+    // run zk-SPARQL query
+    const result = await processQuery(query, store, df, engine);
+    if ('error' in result) {
+      throw new Error('processQuery returns error');
+    }
+
+    // check resulted variables
+    expect(result.head).toEqual({
+      vars: ['vp'],
+    });
+
+    expect(result.results.bindings).toHaveLength(4);
+
+    for (const bindings of result.results.bindings) {
+      // verify VP
+      const vp = JSON.parse(bindings.vp.value) as VerifiablePresentation;
+      const verified = await verifyVP(vp);
+      expect(verified.verified).toBeTruthy();
+
+      // TODO: check if VP is valid for query result
+    }
+  });
+
+  it('should return query results and VPs to the simple ASK query with FILTER', async () => {
     const query = `
       PREFIX xsd: <http://www.w3.org/2001/XMLSchema#>
       PREFIX rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#>
@@ -217,11 +396,15 @@ describe('processQuery', () => {
       vars: ['vp'],
     });
 
+    expect(result.results.bindings).toHaveLength(2);
+
     for (const bindings of result.results.bindings) {
       // verify VP
       const vp = JSON.parse(bindings.vp.value) as VerifiablePresentation;
       const verified = await verifyVP(vp);
       expect(verified.verified).toBeTruthy();
+
+      // TODO: check if VP is valid for query result
     }
   });
 });

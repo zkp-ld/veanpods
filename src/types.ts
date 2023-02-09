@@ -41,7 +41,7 @@ export interface ParsedSparqlQuery {
 export interface ParsedQuery {
   requiredVars: sparqljs.VariableTerm[] | [sparqljs.Wildcard];
   bgpTriples: ZkTripleBgp[];
-  where: sparqljs.Pattern[] | undefined;
+  noBgps: sparqljs.Pattern[];
   prefixes: Record<string, string>;
 }
 

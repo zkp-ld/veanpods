@@ -46,6 +46,12 @@ export const isVariableTerms = (
   vs: sparqljs.Variable[]
 ): vs is sparqljs.VariableTerm[] => vs.every((v) => isVariableTerm(v));
 
+/**
+ * parse zk-SPARQL query
+ *
+ * @param query - zk-SPARQL query
+ * @returns - parsed zk-SPARQL query, consisted of required variables, BGP triples, where clause, and prefixes
+ */
 export const parseQuery = (query: string): ParsedQuery | { error: string } => {
   const varsAndParsedQuery = parseSparqlQuery(query);
   if ('error' in varsAndParsedQuery) {
@@ -54,15 +60,15 @@ export const parseQuery = (query: string): ParsedQuery | { error: string } => {
   const { requiredVars, parsedQuery } = varsAndParsedQuery;
 
   // extract Basic Graph Pattern (BGP) triples from parsed query
-  const bgpTriples = getBgpTriples(parsedQuery);
-  if ('error' in bgpTriples) {
-    return bgpTriples; // TBD
+  const bgpTriplesAndNoBgps = getBgpTriples(parsedQuery);
+  if ('error' in bgpTriplesAndNoBgps) {
+    return bgpTriplesAndNoBgps;
   }
+  const { bgpTriples, noBgps } = bgpTriplesAndNoBgps;
 
-  const where = parsedQuery.where;
   const prefixes = parsedQuery.prefixes;
 
-  return { requiredVars, bgpTriples, where, prefixes };
+  return { requiredVars, bgpTriples, noBgps, prefixes };
 };
 
 // parse SPARQL query
@@ -104,23 +110,35 @@ const parseSparqlQuery = (
 // extract Basic Graph Pattern (BGP) triples from parsed query
 const getBgpTriples = (
   parsedQuery: sparqljs.SelectQuery | sparqljs.AskQuery
-): ZkTripleBgp[] | { error: string } => {
+):
+  | { bgpTriples: ZkTripleBgp[]; noBgps: sparqljs.Pattern[] }
+  | { error: string } => {
+  const where = parsedQuery.where;
+  if (where === undefined) {
+    return {
+      error: 'WHERE clause must exist',
+    };
+  }
+
+  // split BGPs and not BGPs
+  const bgps = where.filter((p) => p.type === 'bgp');
+  const noBgps = where.filter((p) => p.type !== 'bgp');
+
   // validate zk-SPARQL query
-  const bgpPatterns = parsedQuery.where?.filter((p) => p.type === 'bgp');
-  if (bgpPatterns?.length !== 1) {
+  if (bgps.length !== 1) {
     return {
       error: 'WHERE clause must consist of only one basic graph pattern',
     };
   }
 
   // extract BGP triples
-  const bgpPattern = bgpPatterns[0] as sparqljs.BgpPattern;
+  const bgpPattern = bgps[0] as sparqljs.BgpPattern;
   const bgpTriples = bgpPattern.triples;
   if (!isTriplesWithoutPropertyPath(bgpTriples)) {
     return { error: 'property paths are not supported' };
   }
 
-  return bgpTriples;
+  return { bgpTriples, noBgps };
 };
 
 const isTripleWithoutPropertyPath = (

@@ -109,7 +109,7 @@ export const processQuery = async (
 };
 
 /**
- * execute internal SPARQL queries to get extended solutions
+ * execute internal SPARQL queries to get extended solutions and associated VCs
  *
  * @param query - zk-SPARQL query
  * @param store - quadstore where verifiable credentials are stored
@@ -129,8 +129,7 @@ const executeInternalQueries = async (
     return parsedQuery;
   }
 
-  // get extended solutions, i.e.,
-  // SPARQL solutions + graph names corresponding to each BGP triples
+  // run extended SPARQL queries on the quadstore to get extended solutions
   const { extendedSolutions, vcGraphVarAndBgpTriple } =
     await getExtendedSolutions(parsedQuery, df, engine);
 
@@ -206,7 +205,7 @@ const getExtendedSolutions = async (
   df: DataFactory<RDF.Quad>,
   engine: Engine
 ): Promise<ExtendedSolutions> => {
-  const { bgpTriples, where, prefixes } = parsedQuery;
+  const { bgpTriples, noBgps, prefixes } = parsedQuery;
 
   // generate random prefix for temporary variables of internal queries
   const vcGraphVarPrefix = vcGraphVarPrefixGenerator();
@@ -216,7 +215,7 @@ const getExtendedSolutions = async (
     (triple, i) => [`${vcGraphVarPrefix}${i}`, triple]
   );
 
-  // construct an extended SPARQL query
+  // construct an extended BGP
   const extendedGraphPatterns: sparqljs.GraphPattern[] = bgpTriples.map(
     (triple, i) => ({
       type: 'graph',
@@ -229,16 +228,18 @@ const getExtendedSolutions = async (
       name: df.variable(`${vcGraphVarPrefix}${i}`),
     })
   );
-  const extendedWhere = where
-    ?.filter((p) => p.type !== 'bgp') // remove original BGPs
-    .concat(extendedGraphPatterns); // add extended BGPs
+
+  // concat extended BGPs and original no-BGPs (e.g., FILTER)
+  const where = noBgps.concat(extendedGraphPatterns);
+
+  // construct an extended SPARQL query
   const extendedQuery: sparqljs.SelectQuery = {
     type: 'query',
     queryType: 'SELECT',
     distinct: true,
     variables: [new sparqljs.Wildcard()],
     prefixes,
-    where: extendedWhere,
+    where,
   };
 
   // execute extended query and get extended solutions

@@ -283,6 +283,54 @@
     }
   },
   {
+    "@id": "urn:graph:http://example.org/vaccinationCredential/01",
+    "@graph": {
+      "@context": [
+        "https://www.w3.org/2018/credentials/v1",
+        "https://zkp-ld.org/bbs-termwise-2021.jsonld",
+        "https://schema.org",
+        {
+          "Vaccination": "http://example.org/vocab/Vaccination",
+          "isPatientOf": "http://example.org/vocab/isPatientOf",
+          "lotNumber": "http://example.org/vocab/lotNumber",
+          "vaccinationDate": {
+            "@id": "http://example.org/vocab/vaccinationDate",
+            "@type": "xsd:dateTime"
+          },
+          "vaccine": {
+            "@id": "http://example.org/vocab/vaccine",
+            "@type": "@id"
+          }
+        }
+      ],
+      "id": "http://example.org/vaccinationCredential/01",
+      "type": "VerifiableCredential",
+      "issuer": "did:example:issuer1",
+      "issuanceDate": "2022-01-01T00:00:00Z",
+      "expirationDate": "2025-01-01T00:00:00Z",
+      "credentialSubject": {
+        "id": "did:example:xyz",
+        "type": "Person",
+        "name": "John Smith",
+        "isPatientOf": {
+          "type": "Vaccination",
+          "id": "http://example.org/vaccination/01",
+          "vaccinationDate": "2022-01-01T00:00:00Z",
+          "lotNumber": "0000001",
+          "vaccine": "http://example.org/vaccine/987"
+        }
+      },
+      "proof": {
+        "@context": "https://zkp-ld.org/bbs-termwise-2021.jsonld",
+        "type": "BbsTermwiseSignature2021",
+        "created": "2023-02-09T09:35:07Z",
+        "verificationMethod": "did:example:issuer1#bbs-bls-key1",
+        "proofPurpose": "assertionMethod",
+        "proofValue": "mA9oePddXRZK1dTCt9iJOAPd9WabAW0rThUIP6RoLbUdPG1L5pPnRUG9BBpnFuzAZk9X1b6jApMKYEdL4Dn7/FYWZeJckHxW9vz+UVH1S7IfQDGkcW3zuR3eEVPpOot/KY1akOy29JVcl2rkkS5UVw=="
+      }
+    }
+  },
+  {
     "@id": "urn:graph:http://example.org/vaccinationCredential/04",
     "@graph": {
       "@context": [
