@@ -11,7 +11,7 @@ import {
   type JsonBindingsType,
   type JsonResults,
   type ParsedQuery,
-  type VarsAndParsedQuery,
+  type ParsedSparqlQuery,
   type ZkSubject,
   type ZkPredicate,
   type ZkObject,
@@ -46,10 +46,29 @@ export const isVariableTerms = (
   vs: sparqljs.Variable[]
 ): vs is sparqljs.VariableTerm[] => vs.every((v) => isVariableTerm(v));
 
-// parse zk-SPARQL query
-export const parseQuery = (
+export const parseQuery = (query: string): ParsedQuery | { error: string } => {
+  const varsAndParsedQuery = parseSparqlQuery(query);
+  if ('error' in varsAndParsedQuery) {
+    return varsAndParsedQuery;
+  }
+  const { requiredVars, parsedQuery } = varsAndParsedQuery;
+
+  // extract Basic Graph Pattern (BGP) triples from parsed query
+  const bgpTriples = getBgpTriples(parsedQuery);
+  if ('error' in bgpTriples) {
+    return bgpTriples; // TBD
+  }
+
+  const where = parsedQuery.where;
+  const prefixes = parsedQuery.prefixes;
+
+  return { requiredVars, bgpTriples, where, prefixes };
+};
+
+// parse SPARQL query
+const parseSparqlQuery = (
   query: string
-): VarsAndParsedQuery | { error: string } => {
+): ParsedSparqlQuery | { error: string } => {
   const parser = new sparqljs.Parser();
   try {
     const parsedQuery = parser.parse(query);
@@ -83,8 +102,8 @@ export const parseQuery = (
 };
 
 // extract Basic Graph Pattern (BGP) triples from parsed query
-export const getBgpTriples = (
-  parsedQuery: ParsedQuery
+const getBgpTriples = (
+  parsedQuery: sparqljs.SelectQuery | sparqljs.AskQuery
 ): ZkTripleBgp[] | { error: string } => {
   // validate zk-SPARQL query
   const bgpPatterns = parsedQuery.where?.filter((p) => p.type === 'bgp');

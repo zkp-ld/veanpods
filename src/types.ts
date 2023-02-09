@@ -28,16 +28,21 @@ export type ZkObject =
   | sparqljs.BlankTerm
   | sparqljs.LiteralTerm;
 
-export interface IdentifyCredsResultType {
+export interface IdentifyVcsResultType {
   extendedSolution: RDF.Bindings;
-  graphIriToBgpTriple: Map<string, ZkTripleBgp[]>;
+  vcGraphIdToBgpTriple: Map<string, ZkTripleBgp[]>;
 }
 
-export type ParsedQuery = sparqljs.SelectQuery | sparqljs.AskQuery;
-
-export interface VarsAndParsedQuery {
+export interface ParsedSparqlQuery {
   requiredVars: sparqljs.VariableTerm[] | [sparqljs.Wildcard];
-  parsedQuery: ParsedQuery;
+  parsedQuery: sparqljs.SelectQuery | sparqljs.AskQuery;
+}
+
+export interface ParsedQuery {
+  requiredVars: sparqljs.VariableTerm[] | [sparqljs.Wildcard];
+  bgpTriples: ZkTripleBgp[];
+  where: sparqljs.Pattern[] | undefined;
+  prefixes: Record<string, string>;
 }
 
 export interface RevealedQuads {
@@ -52,10 +57,15 @@ export interface RevealedCreds {
 }
 
 export interface InternalQueryResult {
-  extendedSolutions: RDF.Bindings[];
+  revealedSolutions: RDF.Bindings[];
+  jsonVars: string[];
   revealedCredsArray: Array<Map<string, RevealedCreds>>;
-  requiredVars: sparqljs.VariableTerm[] | [sparqljs.Wildcard];
   anonToTerm: Map<string, ZkTerm>;
+}
+
+export interface ExtendedSolutions {
+  extendedSolutions: RDF.Bindings[];
+  vcGraphVarAndBgpTriple: Array<[string, ZkTripleBgp]>;
 }
 
 interface JsonBindingsUriType {
