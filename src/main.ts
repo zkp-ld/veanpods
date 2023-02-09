@@ -1,6 +1,6 @@
 /**
  * veanpods: Verifiable and Anonymous Personal Data Store with zk-SPARQL
- * 
+ *
  * @packageDocumentation
  */
 
@@ -26,8 +26,8 @@ const engine = new Engine(store);
 await store.open();
 
 // store initial documents
-const scope = await store.initScope();     // for preventing blank node collisions
-const quads = await jsonld.toRDF(sampleVcs, { documentLoader }) as RDF.Quad[];
+const scope = await store.initScope(); // for preventing blank node collisions
+const quads = (await jsonld.toRDF(sampleVcs, { documentLoader })) as RDF.Quad[];
 await store.multiPut(quads, { scope });
 
 // setup express server
@@ -40,8 +40,8 @@ app.listen(port, () => {
 
 // zk-SPARQL endpoint
 app.get('/zk-sparql/', async (req, res, next) => {
-  const query = req.query.query
-  if (typeof query !== "string") {
+  const query = req.query.query;
+  if (typeof query !== 'string') {
     next(new Error('SPARQL query must be given as `query` parameter'));
 
     return;

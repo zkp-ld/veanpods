@@ -1,5 +1,5 @@
 // modified to add `VariableTerm` to the `name` of `GraphPattern`
-declare module "sparqljs" {
+declare module 'sparqljs' {
   // Type definitions for sparqljs 3.1
   // Project: https://github.com/RubenVerborgh/SPARQL.js
   // Definitions by: Alexey Morozov <https://github.com/AlexeyMz>
@@ -43,7 +43,12 @@ declare module "sparqljs" {
     equals(other: RdfJs.Term | null | undefined): boolean;
   }
 
-  export type Term = VariableTerm | IriTerm | LiteralTerm | BlankTerm | QuadTerm;
+  export type Term =
+    | VariableTerm
+    | IriTerm
+    | LiteralTerm
+    | BlankTerm
+    | QuadTerm;
 
   export type VariableTerm = RdfJs.Variable;
   export type IriTerm = RdfJs.NamedNode;
@@ -67,10 +72,12 @@ declare module "sparqljs" {
     queryType: 'SELECT';
     variables: Variable[] | [Wildcard];
     distinct?: boolean | undefined;
-    from?: {
-      default: IriTerm[];
-      named: IriTerm[];
-    } | undefined;
+    from?:
+      | {
+          default: IriTerm[];
+          named: IriTerm[];
+        }
+      | undefined;
     reduced?: boolean | undefined;
     group?: Grouping[] | undefined;
     having?: Expression[] | undefined;
@@ -253,7 +260,10 @@ declare module "sparqljs" {
     values: ValuePatternRow[];
   }
 
-  export type ValuePatternRow = Record<string, IriTerm | LiteralTerm | undefined>;
+  export type ValuePatternRow = Record<
+    string,
+    IriTerm | LiteralTerm | undefined
+  >;
 
   export interface Triple {
     subject: IriTerm | BlankTerm | VariableTerm | QuadTerm;
@@ -278,7 +288,7 @@ declare module "sparqljs" {
     | Term;
 
   // allow Expression circularly reference itself
-  export interface Tuple extends Array<Expression> { }
+  export interface Tuple extends Array<Expression> {}
 
   export interface BaseExpression {
     type: string;

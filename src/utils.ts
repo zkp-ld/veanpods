@@ -6,7 +6,7 @@ import { type DataFactory } from 'rdf-data-factory';
 import sparqljs from 'sparqljs';
 
 // built-in JSON-LD contexts and sample VCs
-import { customLoader } from "./data/index.js";
+import { customLoader } from './data/index.js';
 import {
   type JsonBindingsType,
   type JsonResults,
@@ -15,7 +15,7 @@ import {
   type ZkSubject,
   type ZkPredicate,
   type ZkObject,
-  type ZkTripleBgp
+  type ZkTripleBgp,
 } from './types';
 const documentLoader = customLoader;
 
@@ -31,92 +31,94 @@ const CONTEXTS = [
 
 // ** functions ** //
 
-export const isZkSubject =
-  (t: RDF.Term): t is ZkSubject =>
-  (t.termType === 'NamedNode'
-    || t.termType === 'BlankNode');
-export const isZkPredicate =
-  (t: RDF.Term): t is ZkPredicate =>
-    t.termType === 'NamedNode';
-export const isZkObject =
-  (t: RDF.Term): t is ZkObject =>
-  (t.termType === 'NamedNode'
-    || t.termType === 'BlankNode'
-    || t.termType === 'Literal');
-export const isVariableTerm =
-  (v: sparqljs.Variable): v is sparqljs.VariableTerm =>
-    !('expression' in v);
-export const isVariableTerms =
-  (vs: sparqljs.Variable[]): vs is sparqljs.VariableTerm[] =>
-    vs.every((v) => isVariableTerm(v));
+export const isZkSubject = (t: RDF.Term): t is ZkSubject =>
+  t.termType === 'NamedNode' || t.termType === 'BlankNode';
+export const isZkPredicate = (t: RDF.Term): t is ZkPredicate =>
+  t.termType === 'NamedNode';
+export const isZkObject = (t: RDF.Term): t is ZkObject =>
+  t.termType === 'NamedNode' ||
+  t.termType === 'BlankNode' ||
+  t.termType === 'Literal';
+export const isVariableTerm = (
+  v: sparqljs.Variable
+): v is sparqljs.VariableTerm => !('expression' in v);
+export const isVariableTerms = (
+  vs: sparqljs.Variable[]
+): vs is sparqljs.VariableTerm[] => vs.every((v) => isVariableTerm(v));
 
 // parse zk-SPARQL query
-export const parseQuery =
-  (query: string): VarsAndParsedQuery | { error: string } => {
-    const parser = new sparqljs.Parser();
-    try {
-      const parsedQuery = parser.parse(query);
-      if (parsedQuery.type !== 'query') {
-        return { error: 'query must be SELECT or ASK form' };
-      }
-      const queryType = parsedQuery.queryType;
-      if (queryType === 'SELECT') {
-        if (isWildcard(parsedQuery.variables)
-          || (isVariableTerms(parsedQuery.variables))) {
-          return {
-            requiredVars: parsedQuery.variables,
-            parsedQuery,
-          };
-        } else {
-          return { error: 'query must not contain term expressions' }
-        }
-      } else if (queryType === 'ASK') {
+export const parseQuery = (
+  query: string
+): VarsAndParsedQuery | { error: string } => {
+  const parser = new sparqljs.Parser();
+  try {
+    const parsedQuery = parser.parse(query);
+    if (parsedQuery.type !== 'query') {
+      return { error: 'query must be SELECT or ASK form' };
+    }
+    const queryType = parsedQuery.queryType;
+    if (queryType === 'SELECT') {
+      if (
+        isWildcard(parsedQuery.variables) ||
+        isVariableTerms(parsedQuery.variables)
+      ) {
         return {
-          requiredVars: [],
+          requiredVars: parsedQuery.variables,
           parsedQuery,
         };
       } else {
-        return { error: 'query must be SELECT or ASK form' };
+        return { error: 'query must not contain term expressions' };
       }
-    } catch (error) {
-      return { error: 'malformed query' };
+    } else if (queryType === 'ASK') {
+      return {
+        requiredVars: [],
+        parsedQuery,
+      };
+    } else {
+      return { error: 'query must be SELECT or ASK form' };
     }
+  } catch (error) {
+    return { error: 'malformed query' };
   }
+};
 
 // extract Basic Graph Pattern (BGP) triples from parsed query
-export const getBgpTriples =
-  (parsedQuery: ParsedQuery): ZkTripleBgp[] | { error: string } => {
-    // validate zk-SPARQL query
-    const bgpPatterns = parsedQuery.where?.filter((p) => p.type === 'bgp');
-    if (bgpPatterns?.length !== 1) {
-      return { error: 'WHERE clause must consist of only one basic graph pattern' }
-    }
-
-    // extract BGP triples
-    const bgpPattern = bgpPatterns[0] as sparqljs.BgpPattern;
-    const bgpTriples = bgpPattern.triples;
-    if (!isTriplesWithoutPropertyPath(bgpTriples)) {
-      return { error: 'property paths are not supported' };
+export const getBgpTriples = (
+  parsedQuery: ParsedQuery
+): ZkTripleBgp[] | { error: string } => {
+  // validate zk-SPARQL query
+  const bgpPatterns = parsedQuery.where?.filter((p) => p.type === 'bgp');
+  if (bgpPatterns?.length !== 1) {
+    return {
+      error: 'WHERE clause must consist of only one basic graph pattern',
     };
-
-    return bgpTriples;
   }
 
-const isTripleWithoutPropertyPath =
-  (triple: sparqljs.Triple):
-    triple is ZkTripleBgp =>
-    !('type' in triple.predicate && triple.predicate.type === 'path');
+  // extract BGP triples
+  const bgpPattern = bgpPatterns[0] as sparqljs.BgpPattern;
+  const bgpTriples = bgpPattern.triples;
+  if (!isTriplesWithoutPropertyPath(bgpTriples)) {
+    return { error: 'property paths are not supported' };
+  }
 
-const isTriplesWithoutPropertyPath =
-  (triples: sparqljs.Triple[]):
-    triples is ZkTripleBgp[] =>
-    triples.map(isTripleWithoutPropertyPath).every(Boolean);
+  return bgpTriples;
+};
+
+const isTripleWithoutPropertyPath = (
+  triple: sparqljs.Triple
+): triple is ZkTripleBgp =>
+  !('type' in triple.predicate && triple.predicate.type === 'path');
+
+const isTriplesWithoutPropertyPath = (
+  triples: sparqljs.Triple[]
+): triples is ZkTripleBgp[] =>
+  triples.map(isTripleWithoutPropertyPath).every(Boolean);
 
 export const getCredentialMetadata = async (
   graphIri: string,
   df: DataFactory,
   store: Quadstore,
-  engine: Engine,
+  engine: Engine
 ): Promise<RDF.Quad[] | undefined> => {
   const query = `
   SELECT ?cred
@@ -125,26 +127,24 @@ export const getCredentialMetadata = async (
       ?cred a <${VC_TYPE}> .
     }
   }`;
-  const bindingsStream = await engine.queryBindings(query);  // TBD: try-catch
+  const bindingsStream = await engine.queryBindings(query); // TBD: try-catch
   const bindingsArray = await streamToArray(bindingsStream);
   const credIds = bindingsArray.map((bindings) => bindings.get('cred'));
   if (credIds.length === 0) {
     return undefined;
   }
   const credId = credIds[0];
-  if (credId === undefined
-    || (credId.termType !== 'NamedNode'
-      && credId.termType !== 'BlankNode')) {
+  if (
+    credId === undefined ||
+    (credId.termType !== 'NamedNode' && credId.termType !== 'BlankNode')
+  ) {
     return undefined;
   }
   const { items } = await store.get({ subject: credId });
   // remove graph name
-  const cred = items.map(
-    (quad) => df.quad(
-      quad.subject,
-      quad.predicate,
-      quad.object,
-      df.defaultGraph()));
+  const cred = items.map((quad) =>
+    df.quad(quad.subject, quad.predicate, quad.object, df.defaultGraph())
+  );
 
   return cred;
 };
@@ -161,28 +161,32 @@ export const getProofsId = async (
         <${PROOF}> ?proof .
     }
   }`;
-  const bindingsStream = await engine.queryBindings(query);  // TBD: try-catch
+  const bindingsStream = await engine.queryBindings(query); // TBD: try-catch
   const bindingsArray = await streamToArray(bindingsStream);
 
   return bindingsArray.map((bindings) => bindings.get('proof'));
 };
 
 // utility function from [string, T][] to Map<string, T[]>
-export const entriesToMap = <T>(entries: Array<[string, T]>): Map<string, T[]> => {
+export const entriesToMap = <T>(
+  entries: Array<[string, T]>
+): Map<string, T[]> => {
   const res = new Map<string, T[]>();
   for (const entry of entries) {
     if (res.has(entry[0])) {
       res.get(entry[0])?.push(entry[1]);
     } else {
       res.set(entry[0], [entry[1]]);
-    };
-  };
+    }
+  }
 
   return res;
 };
 
 // ref: https://github.com/belayeng/quadstore-comunica/blob/master/spec/src/utils.ts
-export const streamToArray = async <T>(source: RDF.ResultStream<T>): Promise<T[]> => {
+export const streamToArray = async <T>(
+  source: RDF.ResultStream<T>
+): Promise<T[]> => {
   return await new Promise((resolve, reject) => {
     const items: T[] = [];
     source.on('data', (item: T) => {
@@ -197,123 +201,151 @@ export const streamToArray = async <T>(source: RDF.ResultStream<T>): Promise<T[]
   });
 };
 
-export const genJsonResults =
-  (jsonVars: string[], bindingsArray: RDF.Bindings[]): JsonResults => {
-    const isNotNullOrUndefined = <T>(v?: T | null): v is T => v != null;
+export const genJsonResults = (
+  jsonVars: string[],
+  bindingsArray: RDF.Bindings[]
+): JsonResults => {
+  const isNotNullOrUndefined = <T>(v?: T | null): v is T => v != null;
 
-    const jsonBindingsArray = [];
-    for (const bindings of bindingsArray) {
-      const jsonBindingsEntries: Array<[string, JsonBindingsType]> = [...bindings].map(([k, v]) => {
+  const jsonBindingsArray = [];
+  for (const bindings of bindingsArray) {
+    const jsonBindingsEntries: Array<[string, JsonBindingsType]> = [...bindings]
+      .map(([k, v]) => {
         let value: JsonBindingsType;
         if (v.termType === 'Literal') {
           if (v.language !== '') {
             value = {
               type: 'literal',
               value: v.value,
-              'xml:lang': v.language
+              'xml:lang': v.language,
             };
-          } else if (v.datatype.value === 'http://www.w3.org/2001/XMLSchema#string') {
+          } else if (
+            v.datatype.value === 'http://www.w3.org/2001/XMLSchema#string'
+          ) {
             value = {
               type: 'literal',
-              value: v.value
+              value: v.value,
             };
           } else {
             value = {
               type: 'literal',
               value: v.value,
-              datatype: v.datatype.value
+              datatype: v.datatype.value,
             };
           }
         } else if (v.termType === 'NamedNode') {
           value = {
             type: 'uri',
-            value: v.value
+            value: v.value,
           };
         } else if (v.termType === 'BlankNode') {
           value = {
             type: 'bnode',
-            value: v.value
+            value: v.value,
           };
         } else {
           return undefined;
-        };
+        }
 
         return [k.value, value];
-      }).filter(isNotNullOrUndefined) as Array<[string, JsonBindingsType]>;
-      const jsonBindings = Object.fromEntries(jsonBindingsEntries);
-      jsonBindingsArray.push(jsonBindings);
-    }
-
-    return {
-      "head": { "vars": jsonVars },
-      "results": {
-        "bindings": jsonBindingsArray
-      }
-    };
+      })
+      .filter(isNotNullOrUndefined) as Array<[string, JsonBindingsType]>;
+    const jsonBindings = Object.fromEntries(jsonBindingsEntries);
+    jsonBindingsArray.push(jsonBindings);
   }
 
-export const isWildcard = (vars: sparqljs.Variable[] | [sparqljs.Wildcard]): vars is [sparqljs.Wildcard] =>
+  return {
+    head: { vars: jsonVars },
+    results: {
+      bindings: jsonBindingsArray,
+    },
+  };
+};
+
+export const isWildcard = (
+  vars: sparqljs.Variable[] | [sparqljs.Wildcard]
+): vars is [sparqljs.Wildcard] =>
   vars.length === 1 && 'value' in vars[0] && vars[0].value === '*';
 
-export const addBnodePrefix =
-  (quad: RDF.Quad | RDF.Quad[]): RDF.Quad | RDF.Quad[] => {
-    const _addBnodePrefix = (quad: RDF.Quad): RDF.Quad => {
-      if (quad.subject.termType === 'BlankNode'
-        && !quad.subject.value.startsWith(BNODE_PREFIX)) {
-        quad.subject.value = `${BNODE_PREFIX}${quad.subject.value}`;
-      }
-      if (quad.object.termType === 'BlankNode'
-        && !quad.object.value.startsWith(BNODE_PREFIX)) {
-        quad.object.value = `${BNODE_PREFIX}${quad.object.value}`;
-      }
-      if (quad.graph.termType === 'BlankNode'
-        && !quad.graph.value.startsWith(BNODE_PREFIX)) {
-        quad.graph.value = `${BNODE_PREFIX}${quad.graph.value}`;
-      }
-
-      return quad;
+export const addBnodePrefix = (
+  quad: RDF.Quad | RDF.Quad[]
+): RDF.Quad | RDF.Quad[] => {
+  const _addBnodePrefix = (quad: RDF.Quad): RDF.Quad => {
+    if (
+      quad.subject.termType === 'BlankNode' &&
+      !quad.subject.value.startsWith(BNODE_PREFIX)
+    ) {
+      quad.subject.value = `${BNODE_PREFIX}${quad.subject.value}`;
+    }
+    if (
+      quad.object.termType === 'BlankNode' &&
+      !quad.object.value.startsWith(BNODE_PREFIX)
+    ) {
+      quad.object.value = `${BNODE_PREFIX}${quad.object.value}`;
+    }
+    if (
+      quad.graph.termType === 'BlankNode' &&
+      !quad.graph.value.startsWith(BNODE_PREFIX)
+    ) {
+      quad.graph.value = `${BNODE_PREFIX}${quad.graph.value}`;
     }
 
-    return Array.isArray(quad) ? quad.map((q) => _addBnodePrefix(q)) : _addBnodePrefix(quad);
-  }
+    return quad;
+  };
+
+  return Array.isArray(quad)
+    ? quad.map((q) => _addBnodePrefix(q))
+    : _addBnodePrefix(quad);
+};
 
 // ** functions for standard SPARQL endpoint (for debug) **
 
-const respondToSelectQuery =
-  async (query: string, parsedQuery: RDF.QueryBindings<RDF.AllMetadataSupport>): Promise<{ jsonVars: string[]; bindingsArray: RDF.Bindings[]; }> => {
-    const bindingsStream = await parsedQuery.execute();
-    const bindingsArray = await streamToArray(bindingsStream);
-    const jsonVars = bindingsArray.length >= 1 ? [...bindingsArray[0].keys()].map((k) => k.value) : [''];
+const respondToSelectQuery = async (
+  query: string,
+  parsedQuery: RDF.QueryBindings<RDF.AllMetadataSupport>
+): Promise<{ jsonVars: string[]; bindingsArray: RDF.Bindings[] }> => {
+  const bindingsStream = await parsedQuery.execute();
+  const bindingsArray = await streamToArray(bindingsStream);
+  const jsonVars =
+    bindingsArray.length >= 1
+      ? [...bindingsArray[0].keys()].map((k) => k.value)
+      : [''];
 
-    return { jsonVars, bindingsArray };
-  };
+  return { jsonVars, bindingsArray };
+};
 
-const respondToConstructQuery =
-  async (parsedQuery: RDF.QueryQuads<RDF.AllMetadataSupport>): Promise<jsonld.NodeObject> => {
-    const quadsStream = await parsedQuery.execute();
-    const quadsArray = await streamToArray(quadsStream);
-    const quadsArrayWithBnodePrefix = addBnodePrefix(quadsArray);
-    const quadsJsonld = await jsonld.fromRDF(quadsArrayWithBnodePrefix);
-    const quadsJsonldCompact = await jsonld.compact(quadsJsonld, CONTEXTS, { documentLoader });
+const respondToConstructQuery = async (
+  parsedQuery: RDF.QueryQuads<RDF.AllMetadataSupport>
+): Promise<jsonld.NodeObject> => {
+  const quadsStream = await parsedQuery.execute();
+  const quadsArray = await streamToArray(quadsStream);
+  const quadsArrayWithBnodePrefix = addBnodePrefix(quadsArray);
+  const quadsJsonld = await jsonld.fromRDF(quadsArrayWithBnodePrefix);
+  const quadsJsonldCompact = await jsonld.compact(quadsJsonld, CONTEXTS, {
+    documentLoader,
+  });
 
-    return quadsJsonldCompact;
-  };
+  return quadsJsonldCompact;
+};
 
 export const processSparqlQuery = async (
   query: string,
-  engine: Engine):
-  Promise<JsonResults | jsonld.NodeObject | string> => {
+  engine: Engine
+): Promise<JsonResults | jsonld.NodeObject | string> => {
   // parse query
   let parsedQuery: RDF.Query<RDF.AllMetadataSupport>;
   try {
     parsedQuery = await engine.query(query, { unionDefaultGraph: true });
   } catch (error) {
-    return "malformed query";
+    return 'malformed query';
   }
 
   // execute query
   if (parsedQuery.resultType === 'bindings') {
-    const { jsonVars, bindingsArray } = await respondToSelectQuery(query, parsedQuery)
+    const { jsonVars, bindingsArray } = await respondToSelectQuery(
+      query,
+      parsedQuery
+    );
 
     return genJsonResults(jsonVars, bindingsArray);
   } else if (parsedQuery.resultType === 'quads') {
@@ -323,6 +355,6 @@ export const processSparqlQuery = async (
 
     return { head: {}, boolean: askResult };
   } else {
-    return "invalid SPARQL query";
+    return 'invalid SPARQL query';
   }
-}
+};

@@ -2,7 +2,13 @@ import type * as RDF from '@rdfjs/types';
 import { nanoid } from 'nanoid';
 import { type DataFactory } from 'rdf-data-factory';
 import type sparqljs from 'sparqljs';
-import { type ZkObject, type ZkPredicate, type ZkSubject, type ZkTerm, type ZkTripleBgp } from './types';
+import {
+  type ZkObject,
+  type ZkPredicate,
+  type ZkSubject,
+  type ZkTerm,
+  type ZkTripleBgp,
+} from './types';
 import { isZkObject, isZkPredicate, isZkSubject } from './utils.js';
 
 const ANONI_PREFIX = 'https://zkp-ld.org/.well-known/genid/anonymous/iri#';
@@ -26,9 +32,9 @@ export class Anonymizer {
   }
 
   private readonly _genKey = (val: ZkTerm): string =>
-    val.termType === 'Literal' ?
-      `${val.value}:${nanoid(NANOID_LEN)}` :
-      `${val.value}`;
+    val.termType === 'Literal'
+      ? `${val.value}:${nanoid(NANOID_LEN)}`
+      : `${val.value}`;
 
   anonymize = (val: ZkSubject | ZkPredicate): sparqljs.IriTerm => {
     const key = this._genKey(val);
@@ -75,8 +81,12 @@ export class Anonymizer {
       return result;
     }
     const anonLiteral = `${ANONL_PREFIX}${nanoid(NANOID_LEN)}`;
-    const languageOrDatatype = val.language !== '' ? val.language : val.datatype;
-    const anon = this.df.literal(anonLiteral, languageOrDatatype) as sparqljs.LiteralTerm;
+    const languageOrDatatype =
+      val.language !== '' ? val.language : val.datatype;
+    const anon = this.df.literal(
+      anonLiteral,
+      languageOrDatatype
+    ) as sparqljs.LiteralTerm;
     this.literalToAnonMap.set(key, anon);
     this.anonToTerm.set(anonLiteral, val);
 
@@ -98,9 +108,9 @@ export const anonymizeQuad = (
   vars: sparqljs.VariableTerm[],
   bindings: RDF.Bindings,
   df: DataFactory<RDF.Quad>,
-  anonymizer: Anonymizer,
-): RDF.Quad[] => bgpTriples.flatMap(
-  (triple) => {
+  anonymizer: Anonymizer
+): RDF.Quad[] =>
+  bgpTriples.flatMap((triple) => {
     let subject: RDF.Term | undefined;
     if (triple.subject.termType !== 'Variable') {
       subject = triple.subject;
@@ -139,12 +149,16 @@ export const anonymizeQuad = (
 
     const graph = df.defaultGraph();
 
-    if (subject !== undefined && isZkSubject(subject)
-      && predicate !== undefined && isZkPredicate(predicate)
-      && object !== undefined && isZkObject(object)) {
+    if (
+      subject !== undefined &&
+      isZkSubject(subject) &&
+      predicate !== undefined &&
+      isZkPredicate(predicate) &&
+      object !== undefined &&
+      isZkObject(object)
+    ) {
       return [df.quad(subject, predicate, object, graph)];
     } else {
-      return []
+      return [];
     }
-  }
-);
+  });
