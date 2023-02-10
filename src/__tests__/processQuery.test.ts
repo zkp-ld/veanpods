@@ -288,9 +288,6 @@ describe('processQuery', () => {
       const verified = await verifyVP(vp);
       expect(verified.verified).toBeTruthy();
 
-      // debug
-      console.log(JSON.stringify(vp, null, 2));
-
       // TODO: check if VP is valid for query result
     }
   });
