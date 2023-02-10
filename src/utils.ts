@@ -15,7 +15,7 @@ import {
   type ZkSubject,
   type ZkPredicate,
   type ZkObject,
-  type ZkTripleBgp,
+  type ZkTriplePattern,
 } from './types';
 const documentLoader = customLoader;
 
@@ -57,18 +57,18 @@ export const parseQuery = (query: string): ParsedQuery | { error: string } => {
   if ('error' in varsAndParsedQuery) {
     return varsAndParsedQuery;
   }
-  const { requiredVars, parsedQuery } = varsAndParsedQuery;
+  const { vars, parsedQuery } = varsAndParsedQuery;
 
-  // extract Basic Graph Pattern (BGP) triples from parsed query
-  const bgpTriplesAndNoBgps = getBgpTriples(parsedQuery);
-  if ('error' in bgpTriplesAndNoBgps) {
-    return bgpTriplesAndNoBgps;
+  // extract Basic Graph Pattern (BGP) from parsed query
+  const bgpAndNotBgps = getBGP(parsedQuery);
+  if ('error' in bgpAndNotBgps) {
+    return bgpAndNotBgps;
   }
-  const { bgpTriples, noBgps } = bgpTriplesAndNoBgps;
+  const { bgp, notBgps } = bgpAndNotBgps;
 
   const prefixes = parsedQuery.prefixes;
 
-  return { requiredVars, bgpTriples, noBgps, prefixes };
+  return { vars, bgp, notBgps, prefixes };
 };
 
 // parse SPARQL query
@@ -88,7 +88,7 @@ const parseSparqlQuery = (
         isVariableTerms(parsedQuery.variables)
       ) {
         return {
-          requiredVars: parsedQuery.variables,
+          vars: parsedQuery.variables,
           parsedQuery,
         };
       } else {
@@ -96,7 +96,7 @@ const parseSparqlQuery = (
       }
     } else if (queryType === 'ASK') {
       return {
-        requiredVars: [],
+        vars: [],
         parsedQuery,
       };
     } else {
@@ -107,11 +107,11 @@ const parseSparqlQuery = (
   }
 };
 
-// extract Basic Graph Pattern (BGP) triples from parsed query
-const getBgpTriples = (
+// extract a basic graph pattern (BGP) and not-basic graph patterns from parsed query
+const getBGP = (
   parsedQuery: sparqljs.SelectQuery | sparqljs.AskQuery
 ):
-  | { bgpTriples: ZkTripleBgp[]; noBgps: sparqljs.Pattern[] }
+  | { bgp: ZkTriplePattern[]; notBgps: sparqljs.Pattern[] }
   | { error: string } => {
   const where = parsedQuery.where;
   if (where === undefined) {
@@ -122,7 +122,7 @@ const getBgpTriples = (
 
   // split BGPs and not BGPs
   const bgps = where.filter((p) => p.type === 'bgp');
-  const noBgps = where.filter((p) => p.type !== 'bgp');
+  const notBgps = where.filter((p) => p.type !== 'bgp');
 
   // validate zk-SPARQL query
   if (bgps.length !== 1) {
@@ -131,24 +131,23 @@ const getBgpTriples = (
     };
   }
 
-  // extract BGP triples
-  const bgpPattern = bgps[0] as sparqljs.BgpPattern;
-  const bgpTriples = bgpPattern.triples;
-  if (!isTriplesWithoutPropertyPath(bgpTriples)) {
+  // extract triple patterns
+  const bgp = (bgps[0] as sparqljs.BgpPattern).triples;
+  if (!isTriplesWithoutPropertyPath(bgp)) {
     return { error: 'property paths are not supported' };
   }
 
-  return { bgpTriples, noBgps };
+  return { bgp, notBgps };
 };
 
 const isTripleWithoutPropertyPath = (
   triple: sparqljs.Triple
-): triple is ZkTripleBgp =>
+): triple is ZkTriplePattern =>
   !('type' in triple.predicate && triple.predicate.type === 'path');
 
 const isTriplesWithoutPropertyPath = (
   triples: sparqljs.Triple[]
-): triples is ZkTripleBgp[] =>
+): triples is ZkTriplePattern[] =>
   triples.map(isTripleWithoutPropertyPath).every(Boolean);
 
 export const getCredentialMetadata = async (

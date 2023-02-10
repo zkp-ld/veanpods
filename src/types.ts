@@ -8,18 +8,6 @@ export interface VerifiablePresentation {
   verifiableCredential: jsonld.NodeObject[];
 }
 
-type ZkSubjectBgp = sparqljs.IriTerm | sparqljs.VariableTerm;
-type ZkPredicateBgp = sparqljs.IriTerm | sparqljs.VariableTerm;
-type ZkObjectBgp =
-  | sparqljs.IriTerm
-  | sparqljs.LiteralTerm
-  | sparqljs.VariableTerm;
-export interface ZkTripleBgp {
-  subject: ZkSubjectBgp;
-  predicate: ZkPredicateBgp;
-  object: ZkObjectBgp;
-}
-
 export type ZkTerm = ZkSubject | ZkPredicate | ZkObject;
 export type ZkSubject = sparqljs.IriTerm | sparqljs.BlankTerm;
 export type ZkPredicate = sparqljs.IriTerm;
@@ -28,20 +16,29 @@ export type ZkObject =
   | sparqljs.BlankTerm
   | sparqljs.LiteralTerm;
 
+type ZkSubjectBgp = ZkSubject | sparqljs.VariableTerm;
+type ZkPredicateBgp = ZkPredicate | sparqljs.VariableTerm;
+type ZkObjectBgp = ZkObject | sparqljs.VariableTerm;
+export interface ZkTriplePattern {
+  subject: ZkSubjectBgp;
+  predicate: ZkPredicateBgp;
+  object: ZkObjectBgp;
+}
+
 export interface IdentifyVcsResultType {
   extendedSolution: RDF.Bindings;
-  vcGraphIdToBgpTriple: Map<string, ZkTripleBgp[]>;
+  vcGraphIdToBgpTriples: Map<string, ZkTriplePattern[]>;
 }
 
 export interface ParsedSparqlQuery {
-  requiredVars: sparqljs.VariableTerm[] | [sparqljs.Wildcard];
+  vars: sparqljs.VariableTerm[] | [sparqljs.Wildcard];
   parsedQuery: sparqljs.SelectQuery | sparqljs.AskQuery;
 }
 
 export interface ParsedQuery {
-  requiredVars: sparqljs.VariableTerm[] | [sparqljs.Wildcard];
-  bgpTriples: ZkTripleBgp[];
-  noBgps: sparqljs.Pattern[];
+  vars: sparqljs.VariableTerm[] | [sparqljs.Wildcard];
+  bgp: ZkTriplePattern[];
+  notBgps: sparqljs.Pattern[];
   prefixes: Record<string, string>;
 }
 
@@ -50,22 +47,17 @@ export interface RevealedQuads {
   anonymizedQuads: RDF.Quad[];
 }
 
-export interface RevealedCreds {
+export interface RevealedCredential {
   wholeDoc: RDF.Quad[];
   anonymizedDoc: RDF.Quad[];
   proofs: RDF.Quad[][];
+  anonToTerm: Map<string, ZkTerm>;
 }
 
 export interface InternalQueryResult {
   revealedSolutions: RDF.Bindings[];
   jsonVars: string[];
-  revealedCredsArray: Array<Map<string, RevealedCreds>>;
-  anonToTerm: Map<string, ZkTerm>;
-}
-
-export interface ExtendedSolutions {
-  extendedSolutions: RDF.Bindings[];
-  vcGraphVarAndBgpTriple: Array<[string, ZkTripleBgp]>;
+  revealedCredsArray: Array<Map<string, RevealedCredential>>;
 }
 
 interface JsonBindingsUriType {

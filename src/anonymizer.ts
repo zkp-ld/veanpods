@@ -7,7 +7,7 @@ import {
   type ZkPredicate,
   type ZkSubject,
   type ZkTerm,
-  type ZkTripleBgp,
+  type ZkTriplePattern,
 } from './types';
 import { isZkObject, isZkPredicate, isZkSubject } from './utils.js';
 
@@ -104,7 +104,7 @@ export class Anonymizer {
 }
 
 export const anonymizeQuad = (
-  bgpTriples: ZkTripleBgp[],
+  bgpTriples: ZkTriplePattern[],
   vars: sparqljs.VariableTerm[],
   bindings: RDF.Bindings,
   df: DataFactory<RDF.Quad>,

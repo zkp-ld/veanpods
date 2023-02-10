@@ -10,14 +10,10 @@ import { anonymizeQuad, Anonymizer } from './anonymizer.js';
 import { customLoader } from './data/index.js';
 import {
   type InternalQueryResult,
-  type IdentifyVcsResultType,
   type JsonResults,
-  type ParsedQuery,
-  type RevealedCreds,
   type VerifiablePresentation,
-  type ZkTripleBgp,
-  type ZkTerm,
-  type ExtendedSolutions,
+  type ZkTriplePattern,
+  type RevealedCredential,
 } from './types';
 import {
   addBnodePrefix,
@@ -88,11 +84,11 @@ export const processQuery = async (
   if ('error' in internalQueryResult) {
     return internalQueryResult;
   }
-  const { revealedSolutions, jsonVars, revealedCredsArray, anonToTerm } =
+  const { revealedSolutions, jsonVars, revealedCredsArray } =
     internalQueryResult;
 
   // 2. generate VPs
-  const vps = await generateVP(revealedCredsArray, anonToTerm, df);
+  const vps = await generateVP(revealedCredsArray, df);
   if ('error' in vps) {
     return vps;
   }
@@ -129,47 +125,48 @@ const executeInternalQueries = async (
     return parsedQuery;
   }
 
-  // run extended SPARQL queries on the quadstore to get extended solutions
-  const { extendedSolutions, vcGraphVarAndBgpTriple } =
-    await getExtendedSolutions(parsedQuery, df, engine);
+  // generate VC Graph Variables corresponding to each triple patterns in BGP
+  const vcGraphVarPrefix = vcGraphVarPrefixGenerator();
+  const bgpWithVcGraphVar: Array<[ZkTriplePattern, string]> =
+    parsedQuery.bgp.map((triplePattern, i) => [
+      triplePattern,
+      `${vcGraphVarPrefix}${i}`,
+    ]);
 
-  // get revealed and anonymized credentials
-  const anonymizer = new Anonymizer(df);
-  const revealedCredsArray = await Promise.all(
-    extendedSolutions
-      .map((extendedSolution) =>
-        identifyVcs(extendedSolution, vcGraphVarAndBgpTriple)
-      )
-      .map(({ extendedSolution, vcGraphIdToBgpTriple }) =>
-        getRevealedQuads(
-          vcGraphIdToBgpTriple,
-          extendedSolution,
-          parsedQuery.requiredVars,
-          df,
-          anonymizer
-        )
-      )
-      .map(
-        async (revealedQuads) =>
-          await getRevealedCreds(revealedQuads, store, df, engine, anonymizer)
-      )
+  // run extended SPARQL queries on the quadstore to get extended solutions
+  const extendedSolutions = await getExtendedSolutions(
+    bgpWithVcGraphVar,
+    parsedQuery.notBgps,
+    parsedQuery.prefixes,
+    df,
+    engine
   );
 
-  const anonToTerm = anonymizer.anonToTerm;
+  const revealedCredsArray = await Promise.all(
+    extendedSolutions.map(
+      async (extendedSolution) =>
+        await getRevealedCredentials(
+          extendedSolution,
+          bgpWithVcGraphVar,
+          parsedQuery.vars,
+          store,
+          df,
+          engine
+        )
+    )
+  );
 
   // remove unrevealed bindings from extended solutions
-  const requiredVarNames = parsedQuery.requiredVars.map((v) => v.value);
-  const revealedSolutions = isWildcard(parsedQuery.requiredVars)
+  const varNames = parsedQuery.vars.map((v) => v.value);
+  const revealedSolutions = isWildcard(parsedQuery.vars)
     ? extendedSolutions
     : extendedSolutions.map((extendedSolution) =>
-        extendedSolution.filter((_, key) =>
-          requiredVarNames.includes(key.value)
-        )
+        extendedSolution.filter((_, key) => varNames.includes(key.value))
       );
 
   // construct vars for Query Results JSON Format
   let jsonVars: string[];
-  if (isWildcard(parsedQuery.requiredVars)) {
+  if (isWildcard(parsedQuery.vars)) {
     // SELECT * WHERE {...}
     jsonVars =
       extendedSolutions.length >= 1
@@ -177,7 +174,7 @@ const executeInternalQueries = async (
         : [''];
   } else {
     // SELECT ?s ?p ?o WHERE {...}
-    jsonVars = parsedQuery.requiredVars.map((v) => v.value);
+    jsonVars = parsedQuery.vars.map((v) => v.value);
   }
 
   // add 'vp' to vars
@@ -187,10 +184,42 @@ const executeInternalQueries = async (
     revealedSolutions,
     jsonVars,
     revealedCredsArray,
-    anonToTerm,
   };
 };
 
+const getRevealedCredentials = async (
+  extendedSolution: RDF.Bindings,
+  bgpWithVcGraphVar: Array<[ZkTriplePattern, string]>,
+  vars: [sparqljs.Wildcard] | RDF.Variable[],
+  store: Quadstore,
+  df: DataFactory<RDF.Quad>,
+  engine: Engine
+): Promise<Map<string, RevealedCredential>> => {
+  const vcGraphIdToTriplePatterns = identifyVcs(
+    extendedSolution,
+    bgpWithVcGraphVar
+  );
+
+  const anonymizer = new Anonymizer(df);
+
+  const revealedQuads = getRevealedQuads(
+    vcGraphIdToTriplePatterns,
+    extendedSolution,
+    vars,
+    df,
+    anonymizer
+  );
+
+  const revealedCredential = await getRevealedCreds(
+    revealedQuads,
+    store,
+    df,
+    engine,
+    anonymizer
+  );
+
+  return revealedCredential;
+};
 /**
  * get extended SPARQL solutions, which are SPARQL solutions
  * with _names of graphs_ where each input BGP triples is included
@@ -201,36 +230,28 @@ const executeInternalQueries = async (
  * @returns - extended SPARQL solutions
  */
 const getExtendedSolutions = async (
-  parsedQuery: ParsedQuery,
+  bgpWithVcGraphVar: Array<[ZkTriplePattern, string]>,
+  notBgps: sparqljs.Pattern[],
+  prefixes: Record<string, string>,
   df: DataFactory<RDF.Quad>,
   engine: Engine
-): Promise<ExtendedSolutions> => {
-  const { bgpTriples, noBgps, prefixes } = parsedQuery;
-
-  // generate random prefix for temporary variables of internal queries
-  const vcGraphVarPrefix = vcGraphVarPrefixGenerator();
-
-  // pairs a temporary variable and its corresponding BGP triple
-  const vcGraphVarAndBgpTriple: Array<[string, ZkTripleBgp]> = bgpTriples.map(
-    (triple, i) => [`${vcGraphVarPrefix}${i}`, triple]
-  );
-
-  // construct an extended BGP
-  const extendedGraphPatterns: sparqljs.GraphPattern[] = bgpTriples.map(
-    (triple, i) => ({
+): Promise<RDF.Bindings[]> => {
+  // construct an extended graph patterns based on BGP
+  const extendedGraphPatterns: sparqljs.GraphPattern[] = bgpWithVcGraphVar.map(
+    ([triplePattern, vcGraphVar]) => ({
       type: 'graph',
+      name: df.variable(vcGraphVar),
       patterns: [
         {
           type: 'bgp',
-          triples: [triple],
+          triples: [triplePattern],
         },
       ],
-      name: df.variable(`${vcGraphVarPrefix}${i}`),
     })
   );
 
-  // concat extended BGPs and original no-BGPs (e.g., FILTER)
-  const where = noBgps.concat(extendedGraphPatterns);
+  // concat extended graph patterns and original not-BGPs (e.g., FILTER)
+  const where = notBgps.concat(extendedGraphPatterns);
 
   // construct an extended SPARQL query
   const extendedQuery: sparqljs.SelectQuery = {
@@ -246,18 +267,18 @@ const getExtendedSolutions = async (
   const generator = new sparqljs.Generator();
   const generatedQuery = generator.stringify(extendedQuery);
   const bindingsStream = await engine.queryBindings(generatedQuery, {
-    unionDefaultGraph: true,
+    unionDefaultGraph: true, // extended query should be matched for all the VC graphs
   });
   const extendedSolutions = await streamToArray(bindingsStream);
 
-  return { extendedSolutions, vcGraphVarAndBgpTriple };
+  return extendedSolutions;
 };
 
 /**
  * Return `graphIriToBgpTriple` from extended solution and graphVarToBgpTriple
  *
  * @param extendedSolution - extended SPARQL solution
- * @param vcGraphVarAndBgpTriple - pairs of a graph variable and its corresponding BGP triple
+ * @param bgpWithVcGraphVar - pairs of each triple pattern in BGP and its corresponding VC Graph Variable
  * @returns - a map from graph IRI to BGP triple with input extended solution
  *
  * @remarks
@@ -265,26 +286,27 @@ const getExtendedSolutions = async (
  *
  * extendedSolution (graph part only):
  * ```json
- * { "ggggg0": "http://example.org/g0",
+ * { // ... omitted SPARQL solution ...,
+ *   "ggggg0": "http://example.org/g0",
  *   "ggggg1": "http://example.org/g1",
  *   "ggggg2": "http://example.org/g0" }
  * ```
  *
- * vcGraphVarAndBgpTriple:
+ * bgpWithVcGraphVar
  * ```json
- * [ [ "ggggg0", (:s0 :p0 :o0) ],
- *   [ "ggggg1", (:s1 :p1 :o1) ],
- *   [ "ggggg2", (:s2 :p2 :o2) ] ]
+ * [ [ (:s0 :p0 :o0), "ggggg0" ],
+ *   [ (:s1 :p1 :o1), "ggggg1" ],
+ *   [ (:s2 :p2 :o2), "ggggg2" ] ]
  * ```
  *
- * vcGraphIdAndBgpTriples:
+ * vcGraphIdAndTriplepattern:
  * ```json
  * [ [ "http://example.org/g0", (:s0 :p0 :o0) ],
  *   [ "http://example.org/g1", (:s1 :p1 :o1) ],
  *   [ "http://example.org/g0", (:s2 :p2 :o2) ] ]
  * ```
  *
- * vcGraphIdToBgpTriple:
+ * vcGraphIdToTriplePatterns:
  * ```json
  * { "http://example.org/g0": [ (:s0 :p0 :o0), (:s2 :p2 :o2) ],
  *   "http://example.org/g1": [ (:s1 :p1 :o1 ) ] }
@@ -292,30 +314,33 @@ const getExtendedSolutions = async (
  */
 const identifyVcs = (
   extendedSolution: RDF.Bindings,
-  vcGraphVarAndBgpTriple: Array<[string, ZkTripleBgp]>
-): IdentifyVcsResultType => {
-  const vcGraphIdAndBgpTriples: Array<[string, ZkTripleBgp]> = [];
-  for (const [graphVar, bgpTriple] of vcGraphVarAndBgpTriple) {
-    const uri = extendedSolution.get(graphVar);
+  bgpWithVcGraphVar: Array<[ZkTriplePattern, string]>
+): Map<string, ZkTriplePattern[]> => {
+  const vcGraphIdAndTriplePattern: Array<[string, ZkTriplePattern]> = [];
+  for (const [triplePattern, vcGraphVar] of bgpWithVcGraphVar) {
+    const uri = extendedSolution.get(vcGraphVar);
     if (uri === undefined || uri.termType !== 'NamedNode') continue;
-    vcGraphIdAndBgpTriples.push([uri.value, bgpTriple]);
+    vcGraphIdAndTriplePattern.push([uri.value, triplePattern]);
   }
-  const vcGraphIdToBgpTriple = entriesToMap(vcGraphIdAndBgpTriples);
+  const vcGraphIdToTriplePatterns = entriesToMap(vcGraphIdAndTriplePattern);
 
-  return { extendedSolution, vcGraphIdToBgpTriple };
+  return vcGraphIdToTriplePatterns;
 };
 
 // get `revealedQuads`
 const getRevealedQuads = (
-  graphIriToBgpTriple: Map<string, ZkTripleBgp[]>,
+  vcGraphIdToTriplePatterns: Map<string, ZkTriplePattern[]>,
   bindings: RDF.Bindings,
   vars: sparqljs.VariableTerm[] | [sparqljs.Wildcard],
   df: DataFactory<RDF.Quad>,
   anonymizer: Anonymizer
 ): Map<string, RDF.Quad[]> => {
   const result = new Map<string, RDF.Quad[]>();
-  for (const [credGraphIri, bgpTriples] of graphIriToBgpTriple.entries()) {
-    const revealedQuads = bgpTriples.flatMap((triple) => {
+  for (const [
+    vcGraphId,
+    triplePatterns,
+  ] of vcGraphIdToTriplePatterns.entries()) {
+    const revealedQuads = triplePatterns.flatMap((triple) => {
       const subject =
         triple.subject.termType === 'Variable'
           ? bindings.get(triple.subject)
@@ -344,8 +369,8 @@ const getRevealedQuads = (
     });
     const anonymizedQuads = isWildcard(vars)
       ? revealedQuads.map((quad) => df.fromQuad(quad)) // deep copy
-      : anonymizeQuad(bgpTriples, vars, bindings, df, anonymizer);
-    result.set(credGraphIri, anonymizedQuads);
+      : anonymizeQuad(triplePatterns, vars, bindings, df, anonymizer);
+    result.set(vcGraphId, anonymizedQuads);
   }
 
   return result;
@@ -358,8 +383,8 @@ const getRevealedCreds = async (
   df: DataFactory<RDF.Quad>,
   engine: Engine,
   anonymizer: Anonymizer
-): Promise<Map<string, RevealedCreds>> => {
-  const revealedCreds = new Map<string, RevealedCreds>();
+): Promise<Map<string, RevealedCredential>> => {
+  const revealedCreds = new Map<string, RevealedCredential>();
   for (const [graphIri, quads] of revealedQuads) {
     // get whole creds
     const vc = await store.get({
@@ -416,6 +441,7 @@ const getRevealedCreds = async (
       wholeDoc,
       anonymizedDoc,
       proofs,
+      anonToTerm: anonymizer.anonToTerm,
     });
   }
 
@@ -423,8 +449,7 @@ const getRevealedCreds = async (
 };
 
 const generateVP = async (
-  revealedCredsArray: Array<Map<string, RevealedCreds>>,
-  anonToTerm: Map<string, ZkTerm>,
+  revealedCredsArray: Array<Map<string, RevealedCredential>>,
   df: DataFactory<RDF.Quad>
 ): Promise<VerifiablePresentation[] | { error: string }> => {
   const vps: VerifiablePresentation[] = [];
@@ -432,7 +457,7 @@ const generateVP = async (
     // run BBS+
     const inputDocuments = Array.from(
       creds,
-      ([_, { wholeDoc, anonymizedDoc, proofs }]) => ({
+      ([_, { wholeDoc, anonymizedDoc, proofs, anonToTerm }]) => ({
         document: wholeDoc.filter((quad) => quad.predicate.value !== PROOF), // document without `proof` predicate
         proofs,
         revealedDocument: anonymizedDoc.filter(
