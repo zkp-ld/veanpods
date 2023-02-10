@@ -14,9 +14,7 @@
   "parserOptions": {
     "ecmaVersion": "latest",
     "tsconfigRootDir": ".",
-    "project": [
-      "./tsconfig.json"
-    ],
+    "project": ["./tsconfig.eslint.json"],
     "sourceType": "module"
   },
   "plugins": [
