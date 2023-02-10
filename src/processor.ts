@@ -140,9 +140,9 @@ const executeInternalQueries = async (
       .map((extendedSolution) =>
         identifyVcs(extendedSolution, vcGraphVarAndBgpTriple)
       )
-      .map(({ extendedSolution, vcGraphIdToBgpTriple: graphIriToBgpTriple }) =>
+      .map(({ extendedSolution, vcGraphIdToBgpTriple }) =>
         getRevealedQuads(
-          graphIriToBgpTriple,
+          vcGraphIdToBgpTriple,
           extendedSolution,
           parsedQuery.requiredVars,
           df,
