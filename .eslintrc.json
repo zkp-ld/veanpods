@@ -17,10 +17,7 @@
     "project": ["./tsconfig.eslint.json"],
     "sourceType": "module"
   },
-  "plugins": [
-    "@typescript-eslint",
-    "eslint-plugin-tsdoc"
-  ],
+  "plugins": ["@typescript-eslint", "eslint-plugin-tsdoc"],
   "rules": {
     "@typescript-eslint/key-spacing": "off",
     "padding-line-between-statements": [
@@ -73,9 +70,7 @@
             "position": "after"
           }
         ],
-        "pathGroupsExcludedImportTypes": [
-          "builtin"
-        ],
+        "pathGroupsExcludedImportTypes": ["builtin"],
         "alphabetize": {
           "order": "asc"
         }
