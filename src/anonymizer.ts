@@ -7,9 +7,7 @@ import {
   type ZkPredicate,
   type ZkSubject,
   type ZkTerm,
-  type ZkTriplePattern,
 } from './types';
-import { isZkObject, isZkPredicate, isZkSubject } from './utils.js';
 
 const ANONI_PREFIX = 'https://zkp-ld.org/.well-known/genid/anonymous/iri#';
 const ANONB_PREFIX = 'https://zkp-ld.org/.well-known/genid/anonymous/bnid#';
@@ -102,63 +100,3 @@ export class Anonymizer {
     }
   };
 }
-
-export const anonymizeQuad = (
-  bgpTriples: ZkTriplePattern[],
-  vars: sparqljs.VariableTerm[],
-  bindings: RDF.Bindings,
-  df: DataFactory<RDF.Quad>,
-  anonymizer: Anonymizer
-): RDF.Quad[] =>
-  bgpTriples.flatMap((triple) => {
-    let subject: RDF.Term | undefined;
-    if (triple.subject.termType !== 'Variable') {
-      subject = triple.subject;
-    } else if (vars.some((v) => v.value === triple.subject.value)) {
-      subject = bindings.get(triple.subject);
-    } else {
-      const val = bindings.get(triple.subject);
-      if (val !== undefined && isZkSubject(val)) {
-        subject = anonymizer.anonymize(val);
-      }
-    }
-
-    let predicate: RDF.Term | undefined;
-    if (triple.predicate.termType !== 'Variable') {
-      predicate = triple.predicate;
-    } else if (vars.some((v) => v.value === triple.predicate.value)) {
-      predicate = bindings.get(triple.predicate);
-    } else {
-      const val = bindings.get(triple.predicate);
-      if (val !== undefined && isZkPredicate(val)) {
-        predicate = anonymizer.anonymize(val);
-      }
-    }
-
-    let object: RDF.Term | undefined;
-    if (triple.object.termType !== 'Variable') {
-      object = triple.object;
-    } else if (vars.some((v) => v.value === triple.object.value)) {
-      object = bindings.get(triple.object);
-    } else {
-      const val = bindings.get(triple.object);
-      if (val !== undefined && isZkObject(val)) {
-        object = anonymizer.anonymizeObject(val);
-      }
-    }
-
-    const graph = df.defaultGraph();
-
-    if (
-      subject !== undefined &&
-      isZkSubject(subject) &&
-      predicate !== undefined &&
-      isZkPredicate(predicate) &&
-      object !== undefined &&
-      isZkObject(object)
-    ) {
-      return [df.quad(subject, predicate, object, graph)];
-    } else {
-      return [];
-    }
-  });

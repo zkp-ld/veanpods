@@ -48,16 +48,16 @@ export interface RevealedQuads {
 }
 
 export interface RevealedCredential {
-  wholeDoc: RDF.Quad[];
-  anonymizedDoc: RDF.Quad[];
+  document: RDF.Quad[];
   proofs: RDF.Quad[][];
+  anonymizedDoc: RDF.Quad[];
   anonToTerm: Map<string, ZkTerm>;
 }
 
 export interface InternalQueryResult {
   revealedSolutions: RDF.Bindings[];
   jsonVars: string[];
-  revealedCredsArray: Array<Map<string, RevealedCredential>>;
+  revealedCredentialsArray: RevealedCredential[][];
 }
 
 interface JsonBindingsUriType {

@@ -6,7 +6,7 @@ import { type Quadstore } from 'quadstore';
 import { type Engine } from 'quadstore-comunica';
 import { type DataFactory } from 'rdf-data-factory';
 import sparqljs from 'sparqljs';
-import { anonymizeQuad, Anonymizer } from './anonymizer.js';
+import { Anonymizer } from './anonymizer.js';
 import { customLoader } from './data/index.js';
 import {
   type InternalQueryResult,
@@ -84,11 +84,11 @@ export const processQuery = async (
   if ('error' in internalQueryResult) {
     return internalQueryResult;
   }
-  const { revealedSolutions, jsonVars, revealedCredsArray } =
+  const { revealedSolutions, jsonVars, revealedCredentialsArray } =
     internalQueryResult;
 
   // 2. generate VPs
-  const vps = await generateVP(revealedCredsArray, df);
+  const vps = await generateVP(revealedCredentialsArray, df);
   if ('error' in vps) {
     return vps;
   }
@@ -125,7 +125,7 @@ const executeInternalQueries = async (
     return parsedQuery;
   }
 
-  // generate VC Graph Variables corresponding to each triple patterns in BGP
+  // assign a VC Graph Variable to each triple pattern in BGP
   const vcGraphVarPrefix = vcGraphVarPrefixGenerator();
   const bgpWithVcGraphVar: Array<[ZkTriplePattern, string]> =
     parsedQuery.bgp.map((triplePattern, i) => [
@@ -142,7 +142,7 @@ const executeInternalQueries = async (
     engine
   );
 
-  const revealedCredsArray = await Promise.all(
+  const revealedCredentialsArray = await Promise.all(
     extendedSolutions.map(
       async (extendedSolution) =>
         await getRevealedCredentials(
@@ -183,43 +183,10 @@ const executeInternalQueries = async (
   return {
     revealedSolutions,
     jsonVars,
-    revealedCredsArray,
+    revealedCredentialsArray,
   };
 };
 
-const getRevealedCredentials = async (
-  extendedSolution: RDF.Bindings,
-  bgpWithVcGraphVar: Array<[ZkTriplePattern, string]>,
-  vars: [sparqljs.Wildcard] | RDF.Variable[],
-  store: Quadstore,
-  df: DataFactory<RDF.Quad>,
-  engine: Engine
-): Promise<Map<string, RevealedCredential>> => {
-  const vcGraphIdToTriplePatterns = identifyVcs(
-    extendedSolution,
-    bgpWithVcGraphVar
-  );
-
-  const anonymizer = new Anonymizer(df);
-
-  const revealedQuads = getRevealedQuads(
-    vcGraphIdToTriplePatterns,
-    extendedSolution,
-    vars,
-    df,
-    anonymizer
-  );
-
-  const revealedCredential = await getRevealedCreds(
-    revealedQuads,
-    store,
-    df,
-    engine,
-    anonymizer
-  );
-
-  return revealedCredential;
-};
 /**
  * get extended SPARQL solutions, which are SPARQL solutions
  * with _names of graphs_ where each input BGP triples is included
@@ -274,106 +241,109 @@ const getExtendedSolutions = async (
   return extendedSolutions;
 };
 
-/**
- * Return `graphIriToBgpTriple` from extended solution and graphVarToBgpTriple
- *
- * @param extendedSolution - extended SPARQL solution
- * @param bgpWithVcGraphVar - pairs of each triple pattern in BGP and its corresponding VC Graph Variable
- * @returns - a map from graph IRI to BGP triple with input extended solution
- *
- * @remarks
- * ## Examples
- *
- * extendedSolution (graph part only):
- * ```json
- * { // ... omitted SPARQL solution ...,
- *   "ggggg0": "http://example.org/g0",
- *   "ggggg1": "http://example.org/g1",
- *   "ggggg2": "http://example.org/g0" }
- * ```
- *
- * bgpWithVcGraphVar
- * ```json
- * [ [ (:s0 :p0 :o0), "ggggg0" ],
- *   [ (:s1 :p1 :o1), "ggggg1" ],
- *   [ (:s2 :p2 :o2), "ggggg2" ] ]
- * ```
- *
- * vcGraphIdAndTriplepattern:
- * ```json
- * [ [ "http://example.org/g0", (:s0 :p0 :o0) ],
- *   [ "http://example.org/g1", (:s1 :p1 :o1) ],
- *   [ "http://example.org/g0", (:s2 :p2 :o2) ] ]
- * ```
- *
- * vcGraphIdToTriplePatterns:
- * ```json
- * { "http://example.org/g0": [ (:s0 :p0 :o0), (:s2 :p2 :o2) ],
- *   "http://example.org/g1": [ (:s1 :p1 :o1 ) ] }
- * ```
- */
-const identifyVcs = (
+const getRevealedCredentials = async (
   extendedSolution: RDF.Bindings,
-  bgpWithVcGraphVar: Array<[ZkTriplePattern, string]>
-): Map<string, ZkTriplePattern[]> => {
-  const vcGraphIdAndTriplePattern: Array<[string, ZkTriplePattern]> = [];
-  for (const [triplePattern, vcGraphVar] of bgpWithVcGraphVar) {
-    const uri = extendedSolution.get(vcGraphVar);
-    if (uri === undefined || uri.termType !== 'NamedNode') continue;
-    vcGraphIdAndTriplePattern.push([uri.value, triplePattern]);
-  }
-  const vcGraphIdToTriplePatterns = entriesToMap(vcGraphIdAndTriplePattern);
+  bgpWithVcGraphVar: Array<[ZkTriplePattern, string]>,
+  vars: [sparqljs.Wildcard] | RDF.Variable[],
+  store: Quadstore,
+  df: DataFactory<RDF.Quad>,
+  engine: Engine
+): Promise<RevealedCredential[]> => {
+  const anonymizer = new Anonymizer(df);
 
-  return vcGraphIdToTriplePatterns;
+  const anonymizedQuadWithVcGraphId = bgpWithVcGraphVar
+    .map(([triplePattern, vcGraphVar]): [RDF.Quad, string] | undefined => {
+      const anonymizedQuad = getAnonymizedQuad(
+        triplePattern,
+        extendedSolution,
+        vars,
+        anonymizer,
+        df
+      );
+      const vcGraphId = extendedSolution.get(vcGraphVar)?.value;
+      if (anonymizedQuad === undefined || vcGraphId === undefined) {
+        return undefined;
+      }
+
+      return [anonymizedQuad, vcGraphId];
+    })
+    .filter((v): v is NonNullable<[RDF.Quad, string]> => v !== undefined);
+
+  const revealedQuads = entriesToMap(
+    anonymizedQuadWithVcGraphId.map(([anonymizedQuad, vcGraphId]) => [
+      vcGraphId,
+      anonymizedQuad,
+    ])
+  );
+
+  const revealedCredential = await getRevealedCreds(
+    revealedQuads,
+    store,
+    df,
+    engine,
+    anonymizer
+  );
+
+  return revealedCredential;
 };
 
-// get `revealedQuads`
-const getRevealedQuads = (
-  vcGraphIdToTriplePatterns: Map<string, ZkTriplePattern[]>,
-  bindings: RDF.Bindings,
-  vars: sparqljs.VariableTerm[] | [sparqljs.Wildcard],
-  df: DataFactory<RDF.Quad>,
-  anonymizer: Anonymizer
-): Map<string, RDF.Quad[]> => {
-  const result = new Map<string, RDF.Quad[]>();
-  for (const [
-    vcGraphId,
-    triplePatterns,
-  ] of vcGraphIdToTriplePatterns.entries()) {
-    const revealedQuads = triplePatterns.flatMap((triple) => {
-      const subject =
-        triple.subject.termType === 'Variable'
-          ? bindings.get(triple.subject)
-          : triple.subject;
-      const predicate =
-        triple.predicate.termType === 'Variable'
-          ? bindings.get(triple.predicate)
-          : triple.predicate;
-      const object =
-        triple.object.termType === 'Variable'
-          ? bindings.get(triple.object)
-          : triple.object;
-      const graph = df.defaultGraph();
-      if (
-        subject !== undefined &&
-        isZkSubject(subject) &&
-        predicate !== undefined &&
-        isZkPredicate(predicate) &&
-        object !== undefined &&
-        isZkObject(object)
-      ) {
-        return [df.quad(subject, predicate, object, graph)];
-      } else {
-        return [];
-      }
-    });
-    const anonymizedQuads = isWildcard(vars)
-      ? revealedQuads.map((quad) => df.fromQuad(quad)) // deep copy
-      : anonymizeQuad(triplePatterns, vars, bindings, df, anonymizer);
-    result.set(vcGraphId, anonymizedQuads);
+const getAnonymizedQuad = (
+  triple: ZkTriplePattern,
+  extendedSolution: RDF.Bindings,
+  vars: [sparqljs.Wildcard] | RDF.Variable[],
+  anonymizer: Anonymizer,
+  df: DataFactory<RDF.Quad>
+): RDF.Quad | undefined => {
+  let subject: RDF.Term | undefined;
+  if (triple.subject.termType !== 'Variable') {
+    subject = triple.subject;
+  } else if (vars.some((v) => v.value === triple.subject.value)) {
+    subject = extendedSolution.get(triple.subject);
+  } else {
+    const val = extendedSolution.get(triple.subject);
+    if (val !== undefined && isZkSubject(val)) {
+      subject = anonymizer.anonymize(val);
+    }
   }
 
-  return result;
+  let predicate: RDF.Term | undefined;
+  if (triple.predicate.termType !== 'Variable') {
+    predicate = triple.predicate;
+  } else if (vars.some((v) => v.value === triple.predicate.value)) {
+    predicate = extendedSolution.get(triple.predicate);
+  } else {
+    const val = extendedSolution.get(triple.predicate);
+    if (val !== undefined && isZkPredicate(val)) {
+      predicate = anonymizer.anonymize(val);
+    }
+  }
+
+  let object: RDF.Term | undefined;
+  if (triple.object.termType !== 'Variable') {
+    object = triple.object;
+  } else if (vars.some((v) => v.value === triple.object.value)) {
+    object = extendedSolution.get(triple.object);
+  } else {
+    const val = extendedSolution.get(triple.object);
+    if (val !== undefined && isZkObject(val)) {
+      object = anonymizer.anonymizeObject(val);
+    }
+  }
+
+  const graph = df.defaultGraph();
+
+  if (
+    subject !== undefined &&
+    isZkSubject(subject) &&
+    predicate !== undefined &&
+    isZkPredicate(predicate) &&
+    object !== undefined &&
+    isZkObject(object)
+  ) {
+    return df.quad(subject, predicate, object, graph);
+  } else {
+    return undefined;
+  }
 };
 
 // get `revealedCreds`
@@ -383,20 +353,20 @@ const getRevealedCreds = async (
   df: DataFactory<RDF.Quad>,
   engine: Engine,
   anonymizer: Anonymizer
-): Promise<Map<string, RevealedCredential>> => {
-  const revealedCreds = new Map<string, RevealedCredential>();
+): Promise<RevealedCredential[]> => {
+  const revealedCreds = new Array<RevealedCredential>();
   for (const [graphIri, quads] of revealedQuads) {
-    // get whole creds
+    // get a stored VC including revealed subgraph (quads)
     const vc = await store.get({
       graph: df.namedNode(graphIri),
     });
-    // remove graph name
-    const wholeDoc = vc.items.map((quad) =>
+    // remove graph IRI from VC, which is only valid in the internal quadstore
+    const vcDocument = vc.items.map((quad) =>
       df.quad(quad.subject, quad.predicate, quad.object)
     );
 
     // get associated proofs
-    const proofs = await Promise.all(
+    const vcProofs = await Promise.all(
       (
         await getProofsId(graphIri, engine)
       ).flatMap(async (proofId) => {
@@ -412,11 +382,11 @@ const getRevealedCreds = async (
     );
 
     // get credential metadata
-    const metadata =
+    const vcMetadata =
       (await getCredentialMetadata(graphIri, df, store, engine)) ?? [];
 
     // get anonymized credential by adding metadata to anonymized quads
-    const anonymizedMetadata = metadata.map((quad) => {
+    const anonymizedMetadata = vcMetadata.map((quad) => {
       const subject = isZkSubject(quad.subject)
         ? anonymizer.get(quad.subject)
         : quad.subject;
@@ -435,12 +405,12 @@ const getRevealedCreds = async (
       );
     });
     const anonymizedDoc =
-      metadata === undefined ? quads : quads.concat(anonymizedMetadata);
+      vcMetadata === undefined ? quads : quads.concat(anonymizedMetadata);
 
-    revealedCreds.set(graphIri, {
-      wholeDoc,
+    revealedCreds.push({
+      document: vcDocument,
+      proofs: vcProofs,
       anonymizedDoc,
-      proofs,
       anonToTerm: anonymizer.anonToTerm,
     });
   }
@@ -449,16 +419,15 @@ const getRevealedCreds = async (
 };
 
 const generateVP = async (
-  revealedCredsArray: Array<Map<string, RevealedCredential>>,
+  revealedCredentialsArray: RevealedCredential[][],
   df: DataFactory<RDF.Quad>
 ): Promise<VerifiablePresentation[] | { error: string }> => {
   const vps: VerifiablePresentation[] = [];
-  for (const creds of revealedCredsArray) {
+  for (const revealedCredentials of revealedCredentialsArray) {
     // run BBS+
-    const inputDocuments = Array.from(
-      creds,
-      ([_, { wholeDoc, anonymizedDoc, proofs, anonToTerm }]) => ({
-        document: wholeDoc.filter((quad) => quad.predicate.value !== PROOF), // document without `proof` predicate
+    const inputDocuments = revealedCredentials.map(
+      ({ document, proofs, anonymizedDoc, anonToTerm }) => ({
+        document: document.filter((quad) => quad.predicate.value !== PROOF), // document without `proof` predicate
         proofs,
         revealedDocument: anonymizedDoc.filter(
           (quad) => quad.predicate.value !== PROOF
