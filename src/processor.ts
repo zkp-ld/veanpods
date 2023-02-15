@@ -84,7 +84,7 @@ export const processQuery = async (
   if ('error' in internalQueryResult) {
     return internalQueryResult;
   }
-  const { revealedSolutions, jsonVars, revealedCredentialsArray } =
+  const { revealedSolutions, revealedVariables, revealedCredentialsArray } =
     internalQueryResult;
 
   // 2. generate VPs
@@ -100,8 +100,9 @@ export const processQuery = async (
       df.literal(`${JSON.stringify(vps[i], null, 2)}`)
     )
   );
+  revealedVariables.push(VP_KEY_IN_JSON_RESULTS);
 
-  return genJsonResults(jsonVars, revealedSolutionWithVPs);
+  return genJsonResults(revealedVariables, revealedSolutionWithVPs);
 };
 
 /**
@@ -142,6 +143,24 @@ const executeInternalQueries = async (
     engine
   );
 
+  // extract revealed variables from extended solution
+  let revealedVariables: string[];
+  if (isWildcard(parsedQuery.vars)) {
+    revealedVariables =
+      extendedSolutions.length === 0
+        ? ['']
+        : [...extendedSolutions[0].keys()]
+            .map((v) => v.value)
+            .filter((v) => !v.startsWith(vcGraphVarPrefix));
+  } else {
+    revealedVariables = parsedQuery.vars.map((v) => v.value);
+  }
+
+  // remove unrevealed bindings from extended solutions
+  const revealedSolutions = extendedSolutions.map((extendedSolution) =>
+    extendedSolution.filter((_, key) => revealedVariables.includes(key.value))
+  );
+
   const revealedCredentialsArray = await Promise.all(
     extendedSolutions.map(
       async (extendedSolution) =>
@@ -156,33 +175,9 @@ const executeInternalQueries = async (
     )
   );
 
-  // remove unrevealed bindings from extended solutions
-  const varNames = parsedQuery.vars.map((v) => v.value);
-  const revealedSolutions = isWildcard(parsedQuery.vars)
-    ? extendedSolutions
-    : extendedSolutions.map((extendedSolution) =>
-        extendedSolution.filter((_, key) => varNames.includes(key.value))
-      );
-
-  // construct vars for Query Results JSON Format
-  let jsonVars: string[];
-  if (isWildcard(parsedQuery.vars)) {
-    // SELECT * WHERE {...}
-    jsonVars =
-      extendedSolutions.length >= 1
-        ? [...extendedSolutions[0].keys()].map((k) => k.value)
-        : [''];
-  } else {
-    // SELECT ?s ?p ?o WHERE {...}
-    jsonVars = parsedQuery.vars.map((v) => v.value);
-  }
-
-  // add 'vp' to vars
-  jsonVars.push(VP_KEY_IN_JSON_RESULTS);
-
   return {
     revealedSolutions,
-    jsonVars,
+    revealedVariables,
     revealedCredentialsArray,
   };
 };
@@ -269,15 +264,15 @@ const getRevealedCredentials = async (
     })
     .filter((v): v is NonNullable<[RDF.Quad, string]> => v !== undefined);
 
-  const revealedQuads = entriesToMap(
+  const revealedSubgraphs = entriesToMap(
     anonymizedQuadWithVcGraphId.map(([anonymizedQuad, vcGraphId]) => [
       vcGraphId,
       anonymizedQuad,
     ])
   );
 
-  const revealedCredential = await getRevealedCreds(
-    revealedQuads,
+  const revealedCredential = await constructRevealedCredentials(
+    revealedSubgraphs,
     store,
     df,
     engine,
@@ -347,15 +342,15 @@ const getAnonymizedQuad = (
 };
 
 // get `revealedCreds`
-const getRevealedCreds = async (
-  revealedQuads: Map<string, RDF.Quad[]>,
+const constructRevealedCredentials = async (
+  revealedSubgraphs: Map<string, RDF.Quad[]>,
   store: Quadstore,
   df: DataFactory<RDF.Quad>,
   engine: Engine,
   anonymizer: Anonymizer
 ): Promise<RevealedCredential[]> => {
   const revealedCreds = new Array<RevealedCredential>();
-  for (const [graphIri, quads] of revealedQuads) {
+  for (const [graphIri, quads] of revealedSubgraphs) {
     // get a stored VC including revealed subgraph (quads)
     const vc = await store.get({
       graph: df.namedNode(graphIri),

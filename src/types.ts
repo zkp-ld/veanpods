@@ -56,7 +56,7 @@ export interface RevealedCredential {
 
 export interface InternalQueryResult {
   revealedSolutions: RDF.Bindings[];
-  jsonVars: string[];
+  revealedVariables: string[];
   revealedCredentialsArray: RevealedCredential[][];
 }
 
