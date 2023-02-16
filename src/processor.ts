@@ -9,11 +9,11 @@ import sparqljs from 'sparqljs';
 import { Anonymizer } from './anonymizer.js';
 import { customLoader } from './data/index.js';
 import {
-  type InternalQueryResult,
+  type RevealedData,
   type JsonResults,
   type VerifiablePresentation,
   type ZkTriplePattern,
-  type RevealedCredential,
+  type VpSource,
 } from './types';
 import {
   addBnodePrefix,
@@ -75,25 +75,18 @@ export const processQuery = async (
 ): Promise<JsonResults | { error: string }> => {
   // 1. parse zk-SPARQL query and execute SELECT on internal quadstore
   //    to get extended solutions
-  const internalQueryResult = await executeInternalQueries(
-    query,
-    store,
-    df,
-    engine
-  );
-  if ('error' in internalQueryResult) {
-    return internalQueryResult;
+  const revealedData = await getRevealedData(query, store, df, engine);
+  if ('error' in revealedData) {
+    return revealedData;
   }
-  const { revealedSolutions, revealedVariables, revealedCredentialsArray } =
-    internalQueryResult;
+  const { revealedVariables, revealedSolutions, vpSourcesArray } = revealedData;
 
   // 2. generate VPs
-  const vps = await generateVP(revealedCredentialsArray, df);
-  if ('error' in vps) {
-    return vps;
-  }
+  const vps = await Promise.all(
+    vpSourcesArray.map(async (vpSources) => await generateVP(vpSources, df))
+  );
 
-  // 3. add VPs (or VCs) to each corresponding solutions
+  // 3. add VPs to each revealed solutions
   const revealedSolutionWithVPs = revealedSolutions.map((revealedSolution, i) =>
     revealedSolution.set(
       VP_KEY_IN_JSON_RESULTS,
@@ -106,20 +99,20 @@ export const processQuery = async (
 };
 
 /**
- * execute internal SPARQL queries to get extended solutions and associated VCs
+ * get revealed solutions and associated VCs by running internal query
  *
  * @param query - zk-SPARQL query
  * @param store - quadstore where verifiable credentials are stored
  * @param df - RDF/JS DataFactory
  * @param engine - SPARQL engine attached to the quadstore
- * @returns - internal query result including extended solutions, required (revealed) variables, revealed credentials, and anon to term map
+ * @returns - internal query result including revealed variables, revealed solutions, and sources for generating VP
  */
-const executeInternalQueries = async (
+const getRevealedData = async (
   query: string,
   store: Quadstore,
   df: DataFactory<RDF.Quad>,
   engine: Engine
-): Promise<InternalQueryResult | { error: string }> => {
+): Promise<RevealedData | { error: string }> => {
   // parse zk-SPARQL query
   const parsedQuery = parseQuery(query);
   if ('error' in parsedQuery) {
@@ -156,18 +149,14 @@ const executeInternalQueries = async (
     revealedVariables = parsedQuery.vars.map((v) => v.value);
   }
 
-  // remove unrevealed bindings from extended solutions
-  const revealedSolutions = extendedSolutions.map((extendedSolution) =>
-    extendedSolution.filter((_, key) => revealedVariables.includes(key.value))
-  );
-
-  const revealedCredentialsArray = await Promise.all(
+  // get VCs from quadstore and identify revealed subgraphs
+  const vpSourcesArray = await Promise.all(
     extendedSolutions.map(
       async (extendedSolution) =>
-        await getRevealedCredentials(
+        await getVpSources(
           extendedSolution,
           bgpWithVcGraphVar,
-          parsedQuery.vars,
+          revealedVariables,
           store,
           df,
           engine
@@ -175,10 +164,19 @@ const executeInternalQueries = async (
     )
   );
 
+  // remove unrevealed bindings from extended solutions
+  const revealedSolutions = extendedSolutions.map((extendedSolution) =>
+    extendedSolution.filter((_, key) => revealedVariables.includes(key.value))
+  );
+
+  if (revealedSolutions.length !== vpSourcesArray.length) {
+    return { error: 'internal query error' };
+  }
+
   return {
-    revealedSolutions,
     revealedVariables,
-    revealedCredentialsArray,
+    revealedSolutions,
+    vpSourcesArray,
   };
 };
 
@@ -233,17 +231,30 @@ const getExtendedSolutions = async (
   });
   const extendedSolutions = await streamToArray(bindingsStream);
 
+  // TODO: sort solutions
+
   return extendedSolutions;
 };
 
-const getRevealedCredentials = async (
+/**
+ * get source data to generate VP
+ *
+ * @param extendedSolution - extended SPARQL solution
+ * @param bgpWithVcGraphVar - triple pattern with VC Graph variable
+ * @param revealedVariables - variables to be revealed
+ * @param store - quadstore where verifiable credentials are stored
+ * @param df - RDF/JS DataFactory
+ * @param engine - SPARQL engine attached to the quadstore
+ * @returns - source data to generate VP, i.e., VCs (document and proofs), anonymized documents, and de-anonymization map
+ */
+const getVpSources = async (
   extendedSolution: RDF.Bindings,
   bgpWithVcGraphVar: Array<[ZkTriplePattern, string]>,
-  vars: [sparqljs.Wildcard] | RDF.Variable[],
+  revealedVariables: string[],
   store: Quadstore,
   df: DataFactory<RDF.Quad>,
   engine: Engine
-): Promise<RevealedCredential[]> => {
+): Promise<VpSource[]> => {
   const anonymizer = new Anonymizer(df);
 
   const anonymizedQuadWithVcGraphId = bgpWithVcGraphVar
@@ -251,7 +262,7 @@ const getRevealedCredentials = async (
       const anonymizedQuad = getAnonymizedQuad(
         triplePattern,
         extendedSolution,
-        vars,
+        revealedVariables,
         anonymizer,
         df
       );
@@ -271,55 +282,63 @@ const getRevealedCredentials = async (
     ])
   );
 
-  const revealedCredential = await constructRevealedCredentials(
-    revealedSubgraphs,
-    store,
-    df,
-    engine,
-    anonymizer
+  const vpSources = await Promise.all(
+    [...revealedSubgraphs.entries()].map(
+      async ([vcGraphId, revealedSubgraph]) =>
+        await constructVpSource(
+          vcGraphId,
+          revealedSubgraph,
+          store,
+          df,
+          engine,
+          anonymizer
+        )
+    )
   );
 
-  return revealedCredential;
+  return vpSources;
 };
 
 const getAnonymizedQuad = (
-  triple: ZkTriplePattern,
+  triplePattern: ZkTriplePattern,
   extendedSolution: RDF.Bindings,
-  vars: [sparqljs.Wildcard] | RDF.Variable[],
+  revealedVariables: string[],
   anonymizer: Anonymizer,
   df: DataFactory<RDF.Quad>
 ): RDF.Quad | undefined => {
   let subject: RDF.Term | undefined;
-  if (triple.subject.termType !== 'Variable') {
-    subject = triple.subject;
-  } else if (vars.some((v) => v.value === triple.subject.value)) {
-    subject = extendedSolution.get(triple.subject);
+  if (triplePattern.subject.termType !== 'Variable') {
+    subject = triplePattern.subject;
+  } else if (revealedVariables.some((v) => v === triplePattern.subject.value)) {
+    subject = extendedSolution.get(triplePattern.subject);
   } else {
-    const val = extendedSolution.get(triple.subject);
+    const val = extendedSolution.get(triplePattern.subject);
     if (val !== undefined && isZkSubject(val)) {
       subject = anonymizer.anonymize(val);
     }
   }
 
   let predicate: RDF.Term | undefined;
-  if (triple.predicate.termType !== 'Variable') {
-    predicate = triple.predicate;
-  } else if (vars.some((v) => v.value === triple.predicate.value)) {
-    predicate = extendedSolution.get(triple.predicate);
+  if (triplePattern.predicate.termType !== 'Variable') {
+    predicate = triplePattern.predicate;
+  } else if (
+    revealedVariables.some((v) => v === triplePattern.predicate.value)
+  ) {
+    predicate = extendedSolution.get(triplePattern.predicate);
   } else {
-    const val = extendedSolution.get(triple.predicate);
+    const val = extendedSolution.get(triplePattern.predicate);
     if (val !== undefined && isZkPredicate(val)) {
       predicate = anonymizer.anonymize(val);
     }
   }
 
   let object: RDF.Term | undefined;
-  if (triple.object.termType !== 'Variable') {
-    object = triple.object;
-  } else if (vars.some((v) => v.value === triple.object.value)) {
-    object = extendedSolution.get(triple.object);
+  if (triplePattern.object.termType !== 'Variable') {
+    object = triplePattern.object;
+  } else if (revealedVariables.some((v) => v === triplePattern.object.value)) {
+    object = extendedSolution.get(triplePattern.object);
   } else {
-    const val = extendedSolution.get(triple.object);
+    const val = extendedSolution.get(triplePattern.object);
     if (val !== undefined && isZkObject(val)) {
       object = anonymizer.anonymizeObject(val);
     }
@@ -341,144 +360,155 @@ const getAnonymizedQuad = (
   }
 };
 
-// get `revealedCreds`
-const constructRevealedCredentials = async (
-  revealedSubgraphs: Map<string, RDF.Quad[]>,
+const constructVpSource = async (
+  vcGraphId: string,
+  revealedSubgraph: RDF.Quad[],
   store: Quadstore,
   df: DataFactory<RDF.Quad>,
   engine: Engine,
   anonymizer: Anonymizer
-): Promise<RevealedCredential[]> => {
-  const revealedCreds = new Array<RevealedCredential>();
-  for (const [graphIri, quads] of revealedSubgraphs) {
-    // get a stored VC including revealed subgraph (quads)
-    const vc = await store.get({
-      graph: df.namedNode(graphIri),
-    });
-    // remove graph IRI from VC, which is only valid in the internal quadstore
-    const vcDocument = vc.items.map((quad) =>
-      df.quad(quad.subject, quad.predicate, quad.object)
+): Promise<VpSource> => {
+  // get a stored VC including revealed subgraph (quads)
+  const { vcDocument, vcProofs } = await getVerifiableCredential(
+    vcGraphId,
+    store,
+    df,
+    engine
+  );
+
+  // get credential metadata
+  const vcMetadata =
+    (await getCredentialMetadata(vcGraphId, df, store, engine)) ?? [];
+
+  // get anonymized credential by adding metadata to anonymized quads
+  const anonymizedMetadata = vcMetadata.map((quad) => {
+    const subject = isZkSubject(quad.subject)
+      ? anonymizer.get(quad.subject)
+      : quad.subject;
+    const predicate = isZkPredicate(quad.predicate)
+      ? anonymizer.get(quad.predicate)
+      : quad.predicate;
+    const object = isZkObject(quad.object)
+      ? anonymizer.getObject(quad.object)
+      : quad.object;
+
+    return df.quad(
+      subject !== undefined ? subject : quad.subject,
+      predicate !== undefined ? predicate : quad.predicate,
+      object !== undefined ? object : quad.object,
+      df.defaultGraph()
     );
+  });
+  const anonymizedDocument =
+    vcMetadata === undefined
+      ? revealedSubgraph
+      : revealedSubgraph.concat(anonymizedMetadata);
 
-    // get associated proofs
-    const vcProofs = await Promise.all(
-      (
-        await getProofsId(graphIri, engine)
-      ).flatMap(async (proofId) => {
-        if (proofId === undefined) {
-          return [];
-        }
-        const proof = await store.get({
-          graph: df.namedNode(proofId.value),
-        });
+  return {
+    vcDocument,
+    vcProofs,
+    anonymizedDocument,
+    deanonMap: anonymizer.deanonMap,
+  };
+};
 
-        return proof.items;
-      })
-    );
+const getVerifiableCredential = async (
+  vcGraphId: string,
+  store: Quadstore,
+  df: DataFactory<RDF.Quad>,
+  engine: Engine
+): Promise<{ vcDocument: RDF.Quad[]; vcProofs: RDF.Quad[][] }> => {
+  // get a stored VC including revealed subgraph (quads)
+  const vc = await store.get({
+    graph: df.namedNode(vcGraphId),
+  });
+  // remove graph IRI from VC, which is only valid in the internal quadstore
+  // TODO: remove data copy
+  const vcDocument = vc.items.map((quad) =>
+    df.quad(quad.subject, quad.predicate, quad.object)
+  );
 
-    // get credential metadata
-    const vcMetadata =
-      (await getCredentialMetadata(graphIri, df, store, engine)) ?? [];
+  // get associated proofs
+  const vcProofs = await Promise.all(
+    (
+      await getProofsId(vcGraphId, engine)
+    ).flatMap(async (proofId) => {
+      if (proofId === undefined) {
+        return [];
+      }
+      const proof = await store.get({
+        graph: df.namedNode(proofId.value),
+      });
 
-    // get anonymized credential by adding metadata to anonymized quads
-    const anonymizedMetadata = vcMetadata.map((quad) => {
-      const subject = isZkSubject(quad.subject)
-        ? anonymizer.get(quad.subject)
-        : quad.subject;
-      const predicate = isZkPredicate(quad.predicate)
-        ? anonymizer.get(quad.predicate)
-        : quad.predicate;
-      const object = isZkObject(quad.object)
-        ? anonymizer.getObject(quad.object)
-        : quad.object;
+      return proof.items;
+    })
+  );
 
-      return df.quad(
-        subject !== undefined ? subject : quad.subject,
-        predicate !== undefined ? predicate : quad.predicate,
-        object !== undefined ? object : quad.object,
-        df.defaultGraph()
-      );
-    });
-    const anonymizedDoc =
-      vcMetadata === undefined ? quads : quads.concat(anonymizedMetadata);
-
-    revealedCreds.push({
-      document: vcDocument,
-      proofs: vcProofs,
-      anonymizedDoc,
-      anonToTerm: anonymizer.anonToTerm,
-    });
-  }
-
-  return revealedCreds;
+  return { vcDocument, vcProofs };
 };
 
 const generateVP = async (
-  revealedCredentialsArray: RevealedCredential[][],
+  vpSources: VpSource[],
   df: DataFactory<RDF.Quad>
-): Promise<VerifiablePresentation[] | { error: string }> => {
-  const vps: VerifiablePresentation[] = [];
-  for (const revealedCredentials of revealedCredentialsArray) {
-    // run BBS+
-    const inputDocuments = revealedCredentials.map(
-      ({ document, proofs, anonymizedDoc, anonToTerm }) => ({
-        document: document.filter((quad) => quad.predicate.value !== PROOF), // document without `proof` predicate
-        proofs,
-        revealedDocument: anonymizedDoc.filter(
-          (quad) => quad.predicate.value !== PROOF
-        ), // document without `proof` predicate
-        anonToTerm,
-      })
+): Promise<VerifiablePresentation | { error: string }> => {
+  // run BBS+
+  const inputDocuments = vpSources.map(
+    ({ vcDocument, vcProofs, anonymizedDocument, deanonMap }) => ({
+      document: vcDocument.filter((quad) => quad.predicate.value !== PROOF), // document without `proof` predicate
+      proofs: vcProofs,
+      revealedDocument: anonymizedDocument.filter(
+        (quad) => quad.predicate.value !== PROOF
+      ), // document without `proof` predicate
+      anonToTerm: deanonMap,
+    })
+  );
+  const suite = new BbsTermwiseSignatureProof2021({
+    useNativeCanonize: false,
+  });
+  const derivedProofs = await suite.deriveProofMultiRDF({
+    inputDocuments,
+    documentLoader,
+  });
+
+  // serialize derived VCs as JSON-LD documents
+  const derivedVcs = [];
+  for (const { document, proofs } of derivedProofs) {
+    // connect document and proofs
+    const vc = document.find(
+      (quad) =>
+        quad.predicate.value === RDF_TYPE && quad.object.value === VC_TYPE
     );
-    const suite = new BbsTermwiseSignatureProof2021({
-      useNativeCanonize: false,
-    });
-    const derivedProofs = await suite.deriveProofMultiRDF({
-      inputDocuments,
+    if (vc === undefined) {
+      return { error: 'a stored VC does not have Identifier' };
+    }
+    const credentialId = vc.subject;
+    const proofGraphs: RDF.Quad[][] = [];
+    for (const proof of proofs) {
+      const proofGraphId = df.blankNode();
+      const proofGraph = proof.map((quad) =>
+        df.quad(quad.subject, quad.predicate, quad.object, proofGraphId)
+      );
+      proofGraphs.push(proofGraph);
+      document.push(df.quad(credentialId, df.namedNode(PROOF), proofGraphId));
+    }
+    const cred = document.concat(proofGraphs.flat());
+    // add bnode prefix `_:` to blank node ids
+    const credWithBnodePrefix = addBnodePrefix(cred);
+    const credJson = await jsonld.fromRDF(credWithBnodePrefix);
+    // to compact JSON-LD
+    const credJsonCompact = await jsonld.compact(credJson, CONTEXTS, {
       documentLoader,
     });
-
-    // serialize derived VCs as JSON-LD documents
-    const derivedVcs = [];
-    for (const { document, proofs } of derivedProofs) {
-      // connect document and proofs
-      const vc = document.find(
-        (quad) =>
-          quad.predicate.value === RDF_TYPE && quad.object.value === VC_TYPE
-      );
-      if (vc === undefined) {
-        return { error: 'a stored VC does not have Identifier' };
-      }
-      const credentialId = vc.subject;
-      const proofGraphs: RDF.Quad[][] = [];
-      for (const proof of proofs) {
-        const proofGraphId = df.blankNode();
-        const proofGraph = proof.map((quad) =>
-          df.quad(quad.subject, quad.predicate, quad.object, proofGraphId)
-        );
-        proofGraphs.push(proofGraph);
-        document.push(df.quad(credentialId, df.namedNode(PROOF), proofGraphId));
-      }
-      const cred = document.concat(proofGraphs.flat());
-      // add bnode prefix `_:` to blank node ids
-      const credWithBnodePrefix = addBnodePrefix(cred);
-      const credJson = await jsonld.fromRDF(credWithBnodePrefix);
-      // to compact JSON-LD
-      const credJsonCompact = await jsonld.compact(credJson, CONTEXTS, {
-        documentLoader,
-      });
-      // shape it to be a VC
-      const derivedVc = await jsonld.frame(credJsonCompact, VC_FRAME, {
-        documentLoader,
-      });
-      derivedVcs.push(derivedVc);
-    }
-
-    // serialize VP
-    const vp = { ...VP_TEMPLATE };
-    vp.verifiableCredential = derivedVcs;
-    vps.push(vp);
+    // shape it to be a VC
+    const derivedVc = await jsonld.frame(credJsonCompact, VC_FRAME, {
+      documentLoader,
+    });
+    derivedVcs.push(derivedVc);
   }
 
-  return vps;
+  // serialize VP
+  const vp = { ...VP_TEMPLATE };
+  vp.verifiableCredential = derivedVcs;
+
+  return vp;
 };

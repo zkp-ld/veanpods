@@ -47,17 +47,17 @@ export interface RevealedQuads {
   anonymizedQuads: RDF.Quad[];
 }
 
-export interface RevealedCredential {
-  document: RDF.Quad[];
-  proofs: RDF.Quad[][];
-  anonymizedDoc: RDF.Quad[];
-  anonToTerm: Map<string, ZkTerm>;
+export interface VpSource {
+  vcDocument: RDF.Quad[];
+  vcProofs: RDF.Quad[][];
+  anonymizedDocument: RDF.Quad[];
+  deanonMap: Map<string, ZkTerm>;
 }
 
-export interface InternalQueryResult {
-  revealedSolutions: RDF.Bindings[];
+export interface RevealedData {
   revealedVariables: string[];
-  revealedCredentialsArray: RevealedCredential[][];
+  revealedSolutions: RDF.Bindings[];
+  vpSourcesArray: VpSource[][];
 }
 
 interface JsonBindingsUriType {
