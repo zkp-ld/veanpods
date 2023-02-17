@@ -1,6 +1,6 @@
 {
   "name": "@zkp-ld/veanpods",
-  "version": "0.0.2",
+  "version": "0.1.0",
   "author": "yamdan",
   "main": "./main.js",
   "exports": "./main.js",
